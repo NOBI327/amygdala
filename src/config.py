@@ -17,6 +17,11 @@ class Config:
     BACKMAN_MODEL: str = "claude-haiku-4-5-20251001"
     FRONTMAN_MODEL: str = "claude-haiku-4-5-20251001"
 
+    # LLMアダプター設定（Phase 3: マルチプロバイダー対応）
+    LLM_PROVIDER: str = "anthropic"
+    LLM_MODEL: str = "claude-haiku-4-5-20251001"
+    LLM_API_KEY_ENV_VAR: str = "ANTHROPIC_API_KEY"
+
     # トークンコスト見積もり（A1: config内明記）
     BACKMAN_ESTIMATED_TOKENS_PER_CALL: int = 500
     BACKMAN_TOKEN_NOTE: str = "入力~350 + 出力~150トークン想定（Haiku使用時）"
