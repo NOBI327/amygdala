@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 class MemorySystem:
     """
-    感情基盤メモリシステムのメインオーケストレーター。
+    簡易扁桃体模倣型LLMメモリ拡張システムのメインオーケストレーター。
     企画書§8のパイプライン全体を管理する。
 
     DIパターン: 全依存（llm_client, db_manager）をコンストラクタで注入。

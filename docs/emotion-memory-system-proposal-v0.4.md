@@ -1,4 +1,4 @@
-# 감정 기반 메모리 시스템 (Emotion-Weighted Memory System)
+# 간이 편도체 모방형 LLM 메모리 확장 시스템 (Simplified Amygdala Emulation)
 
 ## 프로젝트 기획서 v0.4
 

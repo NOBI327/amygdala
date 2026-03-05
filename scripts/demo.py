@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""感情基盤メモリシステム Phase 1 MVP インタラクティブデモ"""
+"""簡易扁桃体模倣型LLMメモリ拡張システム Phase 1 MVP インタラクティブデモ"""
 import sys
 import logging
 from pathlib import Path
@@ -16,7 +16,7 @@ def main():
     logging.basicConfig(level=logging.WARNING)
     config = Config.from_env()
     print("=" * 60)
-    print("感情基盤メモリシステム Phase 1 MVP")
+    print("簡易扁桃体模倣型LLMメモリ拡張システム Phase 1 MVP")
     print(f"バックマン: {config.BACKMAN_MODEL}")
     print(f"フロントマン: {config.FRONTMAN_MODEL}")
     print(f"ワーキングメモリ: {config.WORKING_MEMORY_TURNS}ターン")

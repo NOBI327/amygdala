@@ -1,8 +1,10 @@
-# 感情重力場メモリシステム
+# 簡易扁桃体模倣型LLMメモリ拡張システム
+
+**Simplified Amygdala Emulation**
 
 [![English](https://img.shields.io/badge/lang-en-blue)](README.md)
 
-感情10軸で記憶を重力場としてモデル化し、感情・場面・時間の多軸検索でLLMに長期記憶を与えるシステム。
+感情10軸で記憶を多次元ベクトル化し、感情・場面・時間の多軸検索でLLMに長期記憶を与えるシステム。
 Dual-Agent構造（Backman + Frontman）とMCPサーバーにより、Claude Codeと統合可能。
 
 MIT License / OSS

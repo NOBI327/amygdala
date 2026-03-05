@@ -12,7 +12,7 @@ from src.db import DatabaseManager
 
 
 def main():
-    parser = argparse.ArgumentParser(description="感情基盤メモリDBを初期化する")
+    parser = argparse.ArgumentParser(description="簡易扁桃体模倣型LLMメモリDBを初期化する")
     parser.add_argument("--db-path", default=None, help="DBファイルパス（省略時: Config.DB_PATH）")
     parser.add_argument("--reset", action="store_true", help="既存DBを削除して再作成")
     args = parser.parse_args()

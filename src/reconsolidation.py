@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 class ConsolidationEngine:
     """
-    感情基盤メモリシステム Phase 2: 再タギングエンジン。
+    簡易扁桃体模倣型LLMメモリ拡張システム Phase 2: 再タギングエンジン。
     企画書§4準拠。recall後のフィードバックに基づいて記憶の感情強度を調節する。
 
     DIパターン: DatabaseManagerをコンストラクタで注入。

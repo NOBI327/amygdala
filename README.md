@@ -1,8 +1,8 @@
-# Emotion Gravity Field Memory System
+# Simplified Amygdala Emulation - An emotion-weighted memory augmentation for LLMs
 
 [![日本語](https://img.shields.io/badge/lang-ja-blue)](README_ja.md)
 
-**Emotion Gravity Field Memory System** models memories as a gravitational field weighted by 10 emotional axes.
+**Simplified Amygdala Emulation** models memories as multi-dimensional vectors weighted by 10 emotional axes.
 It enables long-term memory for LLMs via multi-axis search (emotion × scene × time) and integrates with Claude Code as an MCP server.
 
 MIT License / OSS
