@@ -4,6 +4,8 @@ from unittest.mock import MagicMock, patch
 from src.config import Config
 from src.db import DatabaseManager
 from src.memory_system import MemorySystem
+from src.reconsolidation import ConsolidationEngine
+from src.diversity_watchdog import DiversityWatchdog
 
 
 def make_mock_client(response_text="AI応答テキスト"):
@@ -144,3 +146,54 @@ class TestProcessTurn:
         assert isinstance(r3, str)
         turns = system.working_memory.get_turns()
         assert len(turns) == 3
+
+    def test_consolidation_apply_feedback_called_on_explicit_reference(self, client, db, config):
+        """Phase 2: 明示的記憶参照時にconsolidation.apply_feedbackが呼ばれること"""
+        conn = db.get_connection()
+        conn.execute(
+            """INSERT INTO memories (content, joy, importance, scenes, relevance_score)
+               VALUES (?, ?, ?, ?, ?)""",
+            ("過去の記憶", 0.9, 0.9, json.dumps(["work"]), 1.0)
+        )
+        conn.commit()
+
+        sys = MemorySystem(client, db, config)
+        mock_consolidation = MagicMock(spec=ConsolidationEngine)
+        sys.consolidation = mock_consolidation
+
+        sys.process_turn("さっきの件について教えて")  # 明示的参照キーワード含む
+
+        assert mock_consolidation.apply_feedback.called
+        call_args = mock_consolidation.apply_feedback.call_args
+        assert call_args[0][1] == "positive"
+
+    def test_diversity_watchdog_apply_exploration_called_after_search(self, client, db, config):
+        """Phase 2: diversity_watchdog.apply_explorationが検索後に呼ばれること"""
+        sys = MemorySystem(client, db, config)
+        mock_watchdog = MagicMock(spec=DiversityWatchdog)
+        mock_watchdog.apply_exploration.return_value = []
+        sys.diversity_watchdog = mock_watchdog
+
+        sys.process_turn("テスト入力")
+
+        assert mock_watchdog.apply_exploration.called
+
+    def test_turn_history_appended_after_each_turn(self, system):
+        """Phase 2: turn_historyがprocess_turn後に正しくappendされること"""
+        assert len(system.turn_history) == 0
+
+        system.process_turn("最初の入力")
+        assert len(system.turn_history) == 1
+        assert system.turn_history[0]["user_input"] == "最初の入力"
+
+        system.process_turn("二番目の入力")
+        assert len(system.turn_history) == 2
+        assert system.turn_history[1]["user_input"] == "二番目の入力"
+
+    def test_turn_history_capped_at_10(self, system):
+        """Phase 2: turn_historyが10件を超えた場合FIFOで10件に制限されること"""
+        for i in range(12):
+            system.process_turn(f"入力{i}")
+        assert len(system.turn_history) == 10
+        assert system.turn_history[0]["user_input"] == "入力2"
+        assert system.turn_history[-1]["user_input"] == "入力11"

@@ -127,6 +127,44 @@ class TestDetectExplicitMemoryReference:
             assert backman.detect_explicit_memory_reference(f"{kw}について") is True
 
 
+class TestDetectImplicitFeedback:
+    def test_same_topic_three_turns_returns_positive(self, backman):
+        """テスト11: 同主題3ターン継続 → positive"""
+        recall_content = "Python 非同期 asyncio コルーチン"
+        turn_history = [
+            {"user_input": "Python 非同期 asyncio について教えて", "ai_response": "..."},
+            {"user_input": "asyncio コルーチン の使い方は", "ai_response": "..."},
+            {"user_input": "Python 非同期 処理 のベストプラクティス", "ai_response": "..."},
+        ]
+        assert backman.detect_implicit_feedback(turn_history, recall_content) == "positive"
+
+    def test_different_topic_returns_negative(self, backman):
+        """テスト12: 全く別主題に転換 → negative"""
+        recall_content = "Python 非同期 asyncio コルーチン"
+        turn_history = [
+            {"user_input": "今日の夕食は何にしようか", "ai_response": "..."},
+            {"user_input": "映画のおすすめを教えて", "ai_response": "..."},
+            {"user_input": "天気予報はどうですか", "ai_response": "..."},
+        ]
+        assert backman.detect_implicit_feedback(turn_history, recall_content) == "negative"
+
+    def test_ambiguous_overlap_returns_neutral(self, backman):
+        """テスト13: 曖昧（高/低/ゼロ重複が混在） → neutral"""
+        # recall: 10単語。overlap閾値: 0.2 = 2単語以上
+        recall_content = "alpha beta gamma delta epsilon zeta eta theta iota kappa"
+        turn_history = [
+            {"user_input": "alpha beta omega", "ai_response": "..."},   # 2/10=0.2 → positive
+            {"user_input": "sky river mountain", "ai_response": "..."},  # 0/10=0.0 → negative
+            {"user_input": "alpha cloud water", "ai_response": "..."},   # 1/10=0.1 → neither
+        ]
+        # positive=1, negative=1, neither=1 → 過半数なし → "neutral"
+        assert backman.detect_implicit_feedback(turn_history, recall_content) == "neutral"
+
+    def test_empty_turn_history_returns_neutral(self, backman):
+        """テスト14: 空のturn_history → neutral"""
+        assert backman.detect_implicit_feedback([], "Python 非同期") == "neutral"
+
+
 class TestBuildTaggingPrompt:
     def test_all_few_shot_examples_included(self, backman):
         """テスト9: TAGGING_FEW_SHOT_EXAMPLESの全3件が含まれること"""

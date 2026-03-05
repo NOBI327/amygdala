@@ -163,8 +163,52 @@ JSON出力（以下の形式のみ）:
         ユーザー入力に明示的な記憶への言及があるか検出する。
         A2: MVP段階での明示的フィードバック判定（キーワードマッチのみ）。
 
-        # PHASE2_EXTENSION: implicit_feedback_detection()
-        # 現在は明示的言及のみ。
-        # Phase 2でTF-IDF/BM25ベースの暗黙判定を追加予定。
+        # PHASE2_EXTENSION: Phase 2実装: detect_implicit_feedback() を参照。
         """
         return any(kw in user_input for kw in MEMORY_REFERENCE_KEYWORDS)
+
+    def detect_implicit_feedback(
+        self,
+        turn_history: List[Dict],
+        recall_content: str,
+        window: int = 3,
+    ) -> str:
+        """
+        recall後の会話が同一主題で継続しているか判定する（企画書§5.3 段階2）。
+
+        Args:
+            turn_history: 最近の会話ターン [{"user_input": str, "ai_response": str}]
+            recall_content: recall注入された記憶のcontentテキスト
+            window: 判定に使用するターン数（デフォルト3）
+
+        Returns:
+            "positive" | "neutral" | "negative"
+        """
+        if not turn_history:
+            return "neutral"
+
+        recent_turns = turn_history[-window:]
+        recall_words = set(recall_content.split())
+
+        positive_count = 0
+        negative_count = 0
+
+        for turn in recent_turns:
+            turn_words = set(turn.get("user_input", "").split())
+            denom = max(len(recall_words), len(turn_words))
+            if denom == 0:
+                overlap = 0.0
+            else:
+                overlap = len(recall_words & turn_words) / denom
+
+            if overlap >= 0.2:
+                positive_count += 1
+            elif overlap < 0.05:
+                negative_count += 1
+
+        n = len(recent_turns)
+        if positive_count > n / 2:
+            return "positive"
+        if negative_count > n / 2:
+            return "negative"
+        return "neutral"

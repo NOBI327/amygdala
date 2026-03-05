@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 from .config import Config
 from .db import DatabaseManager
 from .backman import BackmanService
@@ -8,6 +8,8 @@ from .frontman import FrontmanService
 from .working_memory import WorkingMemory
 from .pin_memory import PinMemory
 from .search_engine import SearchEngine
+from .reconsolidation import ConsolidationEngine
+from .diversity_watchdog import DiversityWatchdog
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +36,9 @@ class MemorySystem:
         self.working_memory = WorkingMemory(self.config, db_manager)
         self.pin_memory = PinMemory(self.config, db_manager)
         self.search_engine = SearchEngine(self.config, db_manager)
+        self.consolidation = ConsolidationEngine(self.config, db_manager)
+        self.diversity_watchdog = DiversityWatchdog(self.config, db_manager)
+        self.turn_history: List[Dict] = []
 
     def process_turn(self, user_input: str) -> str:
         """
@@ -74,6 +79,9 @@ class MemorySystem:
 
         # 3. 長期記憶検索
         search_results = self.search_engine.search_memories(emotion_vec, current_scenes)
+
+        # 3.5. DiversityWatchdogによる多様性注入
+        search_results = self.diversity_watchdog.apply_exploration(search_results, emotion_vec)
 
         # 4. コンテキストプロンプト組み立て
         working_mem = self.working_memory.get_turns()
@@ -130,8 +138,8 @@ class MemorySystem:
             ttl_prompt = self.pin_memory.generate_ttl_prompt(expired_pins)
             response_text = response_text + "\n\n" + ttl_prompt
 
-        # 9. 明示的記憶参照の検出
-        if search_results and self.backman.detect_explicit_memory_reference(user_input):
+        # 9. 記憶参照検出とフィードバック適用
+        if search_results:
             memory_ids = [m["id"] for m in search_results]
             dominant = max(
                 {ax: emotion_vec.get(ax, 0.0) for ax in self.config.EMOTION_AXES}.items(),
@@ -139,7 +147,26 @@ class MemorySystem:
                 default=("neutral", 0.0)
             )[0]
             scene_str = current_scenes[0] if current_scenes else ""
-            self.search_engine.log_recall(memory_ids, True, dominant, scene_str)
+
+            # 9a. 明示的シグナル
+            if self.backman.detect_explicit_memory_reference(user_input):
+                self.search_engine.log_recall(memory_ids, True, dominant, scene_str)
+                self.consolidation.apply_feedback(memory_ids, "positive")
+            else:
+                # 9b. 暗黙的シグナル（turn_historyがwindow(3)ターン以上の場合）
+                if len(self.turn_history) >= 3:
+                    recall_content = search_results[0].get("content", "")
+                    feedback_type = self.backman.detect_implicit_feedback(
+                        self.turn_history[-4:], recall_content
+                    )
+                    was_used = feedback_type == "positive"
+                    self.search_engine.log_recall(memory_ids, was_used, dominant, scene_str)
+                    self.consolidation.apply_feedback(memory_ids, feedback_type)
+
+        # 9c. turn_historyへの追加（最新10件のみ保持）
+        self.turn_history.append({"user_input": user_input, "ai_response": response_text})
+        if len(self.turn_history) > 10:
+            self.turn_history = self.turn_history[-10:]
 
         return response_text
 
