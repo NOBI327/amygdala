@@ -64,14 +64,14 @@ class BackmanService:
     B3: 感情タグ付けプロンプトに3件のFew-shot exampleを組み込む。
     """
 
-    def __init__(self, llm_client: Any, config: Config) -> None:
+    def __init__(self, llm_adapter: Any, config: Config) -> None:
         """
         Args:
-            llm_client: Anthropicクライアントまたはモック。
-                        duck typing: messages.create()メソッドを持つオブジェクト。
+            llm_adapter: LLMAdapterまたはMagicMock（DI）
+                         duck typing: generate(prompt, system=None, model=None) -> str を持つオブジェクト。
             config: Config（BACKMAN_MODELを使用）
         """
-        self.client = llm_client
+        self.adapter = llm_adapter
         self.config = config
 
     def _build_tagging_prompt(self, text: str) -> str:
@@ -105,12 +105,10 @@ JSON出力（以下の形式のみ）:
         """
         prompt = self._build_tagging_prompt(text)
         try:
-            response = self.client.messages.create(
-                model=self.config.BACKMAN_MODEL,
-                max_tokens=300,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            raw = response.content[0].text.strip()
+            raw = self.adapter.generate(
+                prompt=prompt,
+                model=self.config.BACKMAN_MODEL
+            ).strip()
             result = json.loads(raw)
             # バリデーション: 全10軸の存在確認
             emotion = result.get("emotion", {})
@@ -148,12 +146,10 @@ JSON出力（以下の形式のみ）:
 
 要約:"""
         try:
-            response = self.client.messages.create(
-                model=self.config.BACKMAN_MODEL,
-                max_tokens=400,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            return response.content[0].text.strip()
+            return self.adapter.generate(
+                prompt=prompt,
+                model=self.config.BACKMAN_MODEL
+            ).strip()
         except Exception as e:
             logger.error(f"Failed to generate summary: {e}")
             raise

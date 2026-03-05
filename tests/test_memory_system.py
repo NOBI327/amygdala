@@ -55,6 +55,12 @@ def client():
             mock_resp.content = [MagicMock(text="AI応答テキスト")]
         return mock_resp
     c.messages.create.side_effect = messages_create_side_effect
+    # BackmanService now calls adapter.generate() — configure accordingly
+    def generate_side_effect(prompt="", system=None, model=None, **kwargs):
+        if "感情軸" in prompt or "感情と場面" in prompt:
+            return json.dumps(make_tag_result())
+        return "AI応答テキスト"
+    c.generate.side_effect = generate_side_effect
     return c
 
 

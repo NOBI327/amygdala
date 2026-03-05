@@ -12,23 +12,17 @@ def config():
 
 
 @pytest.fixture
-def mock_client():
+def mock_adapter():
     return MagicMock()
 
 
 @pytest.fixture
-def backman(mock_client, config):
-    return BackmanService(mock_client, config)
-
-
-def make_mock_response(text: str) -> MagicMock:
-    mock_response = MagicMock()
-    mock_response.content = [MagicMock(text=text)]
-    return mock_response
+def backman(mock_adapter, config):
+    return BackmanService(mock_adapter, config)
 
 
 class TestTagEmotion:
-    def test_normal_json_response(self, backman, mock_client):
+    def test_normal_json_response(self, backman, mock_adapter):
         """テスト1: 正常なJSONを返すモックで期待通りのdictが返ること"""
         emotion_data = {
             "joy": 0.7, "sadness": 0.0, "anger": 0.0, "fear": 0.5,
@@ -36,27 +30,27 @@ class TestTagEmotion:
             "importance": 0.8, "urgency": 0.3
         }
         payload = json.dumps({"emotion": emotion_data, "scenes": ["work"]})
-        mock_client.messages.create.return_value = make_mock_response(payload)
+        mock_adapter.generate.return_value = payload
 
         result = backman.tag_emotion("テスト入力")
 
         assert result["emotion"]["joy"] == 0.7
         assert result["scenes"] == ["work"]
-        mock_client.messages.create.assert_called_once()
+        mock_adapter.generate.assert_called_once()
 
-    def test_invalid_json_raises_value_error(self, backman, mock_client):
+    def test_invalid_json_raises_value_error(self, backman, mock_adapter):
         """テスト2: JSON解析失敗時にValueErrorが発生すること"""
-        mock_client.messages.create.return_value = make_mock_response("not valid json")
+        mock_adapter.generate.return_value = "not valid json"
 
         with pytest.raises(ValueError, match="Backman returned invalid JSON"):
             backman.tag_emotion("テスト入力")
 
-    def test_incomplete_json_axes_filled(self, backman, mock_client):
+    def test_incomplete_json_axes_filled(self, backman, mock_adapter):
         """テスト3: 不完全なJSONでも全10軸が補完されること"""
         # joysのみ含む不完全なemotion
         partial_emotion = {"joy": 0.9}
         payload = json.dumps({"emotion": partial_emotion, "scenes": ["work"]})
-        mock_client.messages.create.return_value = make_mock_response(payload)
+        mock_adapter.generate.return_value = payload
 
         result = backman.tag_emotion("テスト入力")
 
@@ -67,33 +61,33 @@ class TestTagEmotion:
         assert result["emotion"]["joy"] == 0.9
         assert result["emotion"]["sadness"] == 0.0
 
-    def test_scenes_capped_at_three(self, backman, mock_client):
+    def test_scenes_capped_at_three(self, backman, mock_adapter):
         """テスト4: scenesが最大3件に制限されること"""
         emotion_data = {ax: 0.0 for ax in list(backman.config.EMOTION_AXES) + list(backman.config.META_AXES)}
         payload = json.dumps({
             "emotion": emotion_data,
             "scenes": ["work", "learning", "hobby", "health", "daily"]
         })
-        mock_client.messages.create.return_value = make_mock_response(payload)
+        mock_adapter.generate.return_value = payload
 
         result = backman.tag_emotion("テスト入力")
 
         assert len(result["scenes"]) == 3
         assert result["scenes"] == ["work", "learning", "hobby"]
 
-    def test_api_error_propagates(self, backman, mock_client):
+    def test_api_error_propagates(self, backman, mock_adapter):
         """テスト10: APIエラー時に例外が伝播すること"""
-        mock_client.messages.create.side_effect = RuntimeError("API connection error")
+        mock_adapter.generate.side_effect = RuntimeError("API connection error")
 
         with pytest.raises(RuntimeError, match="API connection error"):
             backman.tag_emotion("テスト入力")
 
 
 class TestGenerateSummary:
-    def test_returns_string_from_mock(self, backman, mock_client):
+    def test_returns_string_from_mock(self, backman, mock_adapter):
         """テスト5: モックで文字列が返ること"""
         expected_summary = "ユーザーは仕事でストレスを感じており、上司との関係に不満を持っている。"
-        mock_client.messages.create.return_value = make_mock_response(expected_summary)
+        mock_adapter.generate.return_value = expected_summary
 
         turns = [
             {"user_input": "今日も残業だった", "ai_response": "大変でしたね", "timestamp": "2026-03-05T10:00:00"},
@@ -101,14 +95,14 @@ class TestGenerateSummary:
         result = backman.generate_summary(turns)
 
         assert result == expected_summary
-        mock_client.messages.create.assert_called_once()
+        mock_adapter.generate.assert_called_once()
 
-    def test_empty_turns_returns_empty_string(self, backman, mock_client):
+    def test_empty_turns_returns_empty_string(self, backman, mock_adapter):
         """テスト6: turnsが空の場合に空文字列を返すこと（LLM呼ばない）"""
         result = backman.generate_summary([])
 
         assert result == ""
-        mock_client.messages.create.assert_not_called()
+        mock_adapter.generate.assert_not_called()
 
 
 class TestDetectExplicitMemoryReference:
