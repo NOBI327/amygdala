@@ -4,18 +4,27 @@
 
 [![English](https://img.shields.io/badge/lang-en-blue)](README.md)
 
-感情10軸で記憶を多次元ベクトル化し、感情・場面・時間の多軸検索でLLMに長期記憶を与えるシステム。
+感情10軸・シーン8軸・時間減衰の3軸検索でLLMに長期記憶を与えるシステム。
 Dual-Agent構造（Backman + Frontman）とMCPサーバーにより、Claude Codeと統合可能。
 
 MIT License / OSS
 
 ---
 
-## なぜ感情ベースが革新的か
+## なぜ感情×場面×時間が革新的か
 
-従来のLLMメモリは「テキスト類似度」でしか記憶を検索できない。人間の記憶は感情で結びついている。
-このシステムは joy / sadness / anger / fear / surprise / disgust / trust / anticipation の8感情軸 +
-重要度・緊急度の2メタ軸で記憶を多次元ベクトル化し、「感情的に近い記憶」を優先的に想起する。
+従来のLLMメモリは「テキスト類似度」でしか記憶を検索できない。人間の記憶は感情・場面・時間で立体的に結びついている。
+このシステムは**3軸構造**で記憶を多次元ベクトル化し、人間の記憶想起に近い検索を実現する。
+
+### 3軸構造
+
+| 軸 | 詳細 |
+|----|------|
+| **感情軸（10軸）** | joy / sadness / anger / fear / surprise / disgust / trust / anticipation（8感情）+ importance / urgency（重要度・緊急度） |
+| **シーン軸（8シーン）** | work / relationship / hobby / health / learning / daily / philosophy / meta |
+| **時間軸** | 半減期ベースの時間減衰: `0.5 ** (days_ago / half_life)`（頻繁に参照された記憶ほど半減期が長い） |
+
+ストーリー: 「人間の記憶は感情だけでなく、場面と時間にも紐づく」
 
 さらにDiversityWatchdog（Phase 2）がエコーチェンバー（同一記憶の反復参照）を防ぎ、
 フィードバックループが実際に活用された記憶を強化する。
@@ -81,11 +90,33 @@ WorkingMemory更新 → 10ターン超過で長期記憶に移管
 
 ---
 
+## メモリ構造
+
+### ワーキングメモリ（WorkingMemory）
+
+前頭前皮質のワーキングメモリに対応する短期バッファ。
+
+- **直近10ターン**の会話を原文のまま保存（FIFOバッファ）
+- 常に最新の文脈を保持し、Frontmanはこれをプロンプトに組み込む
+- **10ターン満了時**: 溢れた古いターンをBackmanで感情タギング → 圧縮 → 長期記憶DB（SQLite）に移管
+- SQLiteの`working_memory`テーブルに永続化されるため、セッション再起動後も継続
+
+### ピンメモリ（PinMemory）
+
+前頭前皮質の能動的維持（Active Maintenance）に対応する明示的固定記憶。
+
+- ユーザーが「覚えといて」「忘れないで」などのキーワードで明示指定した情報を保持
+- **最大3スロット**（スロット満杯時は新規登録不可、既存ピンを解除してから登録）
+- **TTL付き**（10ターン経過で期限切れ通知 → ユーザーが更新または解除を選択）
+- 解除時は長期記憶DBに移管（`pinned_flag=True`, `relevance_score=2.0` で高優先度）
+
+---
+
 ## インストール手順
 
 ```bash
-git clone https://github.com/NOBI327/emotion-gravity-field-proposal.git
-cd emotion-gravity-field-proposal
+git clone https://github.com/NOBI327/amygdala.git
+cd amygdala
 pip install -r requirements.txt
 pip install mcp  # MCPサーバー使用時
 export ANTHROPIC_API_KEY=your_key
@@ -114,7 +145,7 @@ Claude Codeから本システムをMCPサーバーとして利用できる。
     "emotion-memory": {
       "command": "python",
       "args": ["-m", "src.mcp_server"],
-      "cwd": "/path/to/emotion-gravity-field-proposal"
+      "cwd": "/path/to/amygdala"
     }
   }
 }
@@ -128,7 +159,7 @@ Claude Codeから本システムをMCPサーバーとして利用できる。
     "emotion-memory": {
       "command": "python",
       "args": ["-m", "src.mcp_server"],
-      "cwd": "/path/to/emotion-gravity-field-proposal"
+      "cwd": "/path/to/amygdala"
     }
   }
 }
@@ -186,7 +217,7 @@ AI: 3月15日のお誕生日の件ですね。[記憶を参照して応答]
 ### ディレクトリ構成
 
 ```
-emotion-gravity-field-proposal/
+amygdala/
 ├── src/
 │   ├── __init__.py
 │   ├── config.py             # 設定値（DI用コンテナ）
@@ -237,5 +268,5 @@ MIT License
 
 Pull Requestは歓迎。バグ報告・機能提案はGitHub Issuesへ。
 
-- Repository: https://github.com/NOBI327/emotion-gravity-field-proposal
-- Issues: https://github.com/NOBI327/emotion-gravity-field-proposal/issues
+- Repository: https://github.com/NOBI327/amygdala
+- Issues: https://github.com/NOBI327/amygdala/issues
