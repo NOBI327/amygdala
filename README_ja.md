@@ -4,7 +4,7 @@
 
 [![English](https://img.shields.io/badge/lang-en-blue)](README.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-138%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-146%20passed-brightgreen)]()
 [![Coverage](https://img.shields.io/badge/coverage-93%25-brightgreen)]()
 
 ---
@@ -322,6 +322,7 @@ python scripts/demo.py
 | Phase 1 | MVP — DB / Backman / Frontman / WorkingMemory / PinMemory / SearchEngine / Config / MemorySystem | 77件 PASS | 完了 |
 | Phase 2 | フィードバックループ + 多様性制御 — DiversityWatchdog / ConsolidationEngine / 暗黙的フィードバック | 108件 PASS | 完了 |
 | Phase 3 | MCPサーバー + マルチプロバイダLLM — LLMAdapter / MCPServer | 138件 PASS | 完了 |
+| Phase 4 | APIキーレス委任 + 保安強化 + README改訂 + フィードバック実測基盤 | 146件 PASS | 完了 |
 
 ### ディレクトリ構成
 
@@ -342,8 +343,12 @@ amygdala/
 │   └── memory_system.py      # MemorySystem（オーケストレーター）
 ├── scripts/
 │   ├── init_db.py
-│   └── demo.py
-├── tests/                    # 138テスト、93%カバレッジ
+│   ├── demo.py
+│   ├── label_tool.py          # フィードバック精度ラベリングツール（Phase 4）
+│   ├── run_labeling.sh        # ラベリング実行スクリプト（Phase 4）
+│   ├── export_recall_log.py   # recall_log CSVエクスポーター（Phase 4）
+│   └── accuracy_report.py     # 精度レポート自動生成（Phase 4）
+├── tests/                    # 146テスト、93%カバレッジ
 ├── docs/
 │   └── emotion-memory-system-proposal-v0.4.md
 └── requirements.txt

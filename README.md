@@ -4,7 +4,7 @@
 
 [![日本語](https://img.shields.io/badge/lang-ja-blue)](README_ja.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-138%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-146%20passed-brightgreen)]()
 [![Coverage](https://img.shields.io/badge/coverage-93%25-brightgreen)]()
 
 ---
@@ -322,6 +322,7 @@ See [proposal v0.4](docs/emotion-memory-system-proposal-v0.4.md) for details.
 | Phase 1 | MVP — DB / Backman / Frontman / WorkingMemory / PinMemory / SearchEngine / Config / MemorySystem | 77 PASS | Done |
 | Phase 2 | Feedback loop + diversity control — DiversityWatchdog / ConsolidationEngine / implicit feedback | 108 PASS | Done |
 | Phase 3 | MCP server + multi-provider LLM — LLMAdapter / MCPServer | 138 PASS | Done |
+| Phase 4 | API-keyless delegation + security hardening + README overhaul + eval infrastructure | 146 PASS | Done |
 
 ### Directory Structure
 
@@ -342,8 +343,12 @@ amygdala/
 │   └── memory_system.py      # MemorySystem (orchestrator)
 ├── scripts/
 │   ├── init_db.py
-│   └── demo.py
-├── tests/                    # 138 tests, 93% coverage
+│   ├── demo.py
+│   ├── label_tool.py          # Feedback accuracy labeling tool (Phase 4)
+│   ├── run_labeling.sh        # Labeling workflow runner (Phase 4)
+│   ├── export_recall_log.py   # recall_log CSV exporter (Phase 4)
+│   └── accuracy_report.py     # Accuracy report generator (Phase 4)
+├── tests/                    # 146 tests, 93% coverage
 ├── docs/
 │   └── emotion-memory-system-proposal-v0.4.md
 └── requirements.txt
