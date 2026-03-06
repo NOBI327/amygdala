@@ -1,4 +1,5 @@
 """Tests for llm_adapter.py"""
+import os
 import pytest
 from unittest.mock import MagicMock, patch
 from src.llm_adapter import (
@@ -167,3 +168,39 @@ class TestAdapterFactory:
         with patch("anthropic.Anthropic", return_value=mock_client):
             adapter = AdapterFactory.create_adapter("anthropic", model="claude-opus-4-6")
         assert adapter._default_model == "claude-opus-4-6"
+
+
+# ---------------------------------------------------------------------------
+# api_key_env_var tests
+# ---------------------------------------------------------------------------
+
+class TestAdapterFactoryApiKeyEnvVar:
+    def test_api_key_env_var_reads_from_environ(self):
+        """api_key_env_var reads API key from os.environ and passes it to the client."""
+        mock_client = _make_mock_client()
+        with patch.dict(os.environ, {"MY_TEST_API_KEY": "sk-test-abc123"}):
+            with patch("anthropic.Anthropic", return_value=mock_client) as mock_anthropic:
+                adapter = AdapterFactory.create_adapter(
+                    "anthropic", api_key_env_var="MY_TEST_API_KEY"
+                )
+        mock_anthropic.assert_called_once_with(api_key="sk-test-abc123")
+        assert isinstance(adapter, AnthropicAdapter)
+
+    def test_api_key_env_var_not_set_raises_value_error(self):
+        """api_key_env_var raises ValueError when the specified env var is not set."""
+        env_without_key = {k: v for k, v in os.environ.items() if k != "NONEXISTENT_KEY_XYZ"}
+        with patch.dict(os.environ, env_without_key, clear=True):
+            with pytest.raises(ValueError, match="NONEXISTENT_KEY_XYZ"):
+                AdapterFactory.create_adapter("anthropic", api_key_env_var="NONEXISTENT_KEY_XYZ")
+
+    def test_api_key_env_var_overrides_api_key_param(self):
+        """api_key_env_var takes precedence over the api_key parameter."""
+        mock_client = _make_mock_client()
+        with patch.dict(os.environ, {"ENV_KEY": "sk-from-env"}):
+            with patch("anthropic.Anthropic", return_value=mock_client) as mock_anthropic:
+                AdapterFactory.create_adapter(
+                    "anthropic",
+                    api_key="sk-explicit",
+                    api_key_env_var="ENV_KEY",
+                )
+        mock_anthropic.assert_called_once_with(api_key="sk-from-env")

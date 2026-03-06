@@ -1,30 +1,80 @@
-# Simplified Amygdala Emulation - An emotion-weighted memory augmentation for LLMs
+# Amygdala — Give Your LLM the Power to Remember
+
+**Simplified Amygdala Emulation — Emotion-based memory augmentation for LLMs**
 
 [![日本語](https://img.shields.io/badge/lang-ja-blue)](README_ja.md)
-
-**Simplified Amygdala Emulation** models memories as multi-dimensional vectors weighted by 10 emotional axes.
-It enables long-term memory for LLMs via multi-axis search (emotion × scene × time) and integrates with Claude Code as an MCP server.
-
-MIT License / OSS
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-138%20passed-brightgreen)]()
+[![Coverage](https://img.shields.io/badge/coverage-93%25-brightgreen)]()
 
 ---
 
-## Why Emotion-Based Memory is Revolutionary
+## Sound familiar?
 
-Traditional LLM memory retrieves memories only by text similarity. Human memory, however, is anchored not just to emotions, but to scenes and time.
+> "We talked about this yesterday" → Claude: "I'm sorry, I don't have access to previous conversations."
 
-This system encodes memories as multi-dimensional vectors across **three axes**:
+> Used `/clear` and lost everything. Starting from scratch again.
 
-| Axis | Dimensions | Details |
-|------|-----------|---------|
-| **Emotion** | 10 axes | joy / sadness / anger / fear / surprise / disgust / trust / anticipation + importance / urgency |
-| **Scene** | 8 tags | work / relationship / hobby / health / learning / daily / philosophy / meta |
-| **Time** | decay function | `0.5 ^ (days / half_life)` — recent memories are weighted more heavily |
+> In a long coding session, the AI has forgotten the design decisions made at the beginning.
 
-During recall, the composite score combines all three axes, allowing the system to surface memories that are emotionally relevant, contextually appropriate, and temporally recent.
+**Amygdala solves this.**
 
-In addition, the **DiversityWatchdog** (Phase 2) prevents echo chambers (repeated retrieval of the same memory),
-and the feedback loop reinforces memories that are actually referenced.
+Whether the session ends, you run `/clear`, or days pass — your AI remembers the context of your conversations. And not just keyword matching: **emotionally significant conversations leave stronger memories**, just like the human brain.
+
+---
+
+## Before / After
+
+| | Before (plain Claude Code) | After (with Amygdala) |
+|---|---|---|
+| After `/clear` | Everything forgotten. Start from zero. | Long-term memory DB is searched for emotionally relevant memories; conversation continues seamlessly. |
+| Session disconnect | Working memory lost. | Last 10 turns are persisted in SQLite. Carried over to the next session. |
+| Conversation from 3 days ago | Does not exist. | "That project thing" is enough to recall it. |
+| Important decisions | Must be re-explained every time. | Pinned in PinMemory. Remembered without asking. |
+| Recurring preferences / policies | Must be explained every time. | Learned through use; reflected naturally. |
+| Long sessions | Early context fades (Lost in the Middle). | Emotionally important exchanges act as anchors. |
+
+---
+
+## Amygdala in 30 Seconds
+
+```
+You: "Spent 3 weeks on that project, presented it, got no reaction..."
+   → Amygdala stores: sadness 0.6 / importance 0.9 / scene: work
+
+(3 days later, different session)
+You: "How should I prepare for the next presentation?"
+   → Previous presentation experience recalled via emotional similarity
+   → AI generates advice informed by that past experience
+```
+
+```
+You: "Remember this: always go through staging before deploying"
+   → Registered in PinMemory (max 3 slots)
+
+(20 turns later)
+You: "Can I push to production?"
+   → PinMemory auto-referenced: "You have a rule about going through staging first."
+```
+
+---
+
+## Key Features
+
+### Emotion-Based Memory Retrieval
+Memories are searched not by text similarity, but by a **10-axis emotion vector** (joy, anger, surprise, etc.). "That time it was really tough" surfaces emotionally similar memories.
+
+### Memory That Persists Across Sessions
+Even after `/clear` or session disconnect, memories stored in the long-term DB remain. Working memory is also persisted to SQLite, so context carries over to the next session.
+
+### Pin Memory (3 Slots)
+Say "remember this" to anchor important information. Every 10 turns the system checks: "Still need this?" If released, the memory is transferred to long-term storage with high priority.
+
+### Echo Chamber Prevention
+DiversityWatchdog monitors for repetitive recall of the same memories. When imbalance is detected, memories from other categories are automatically injected.
+
+### Gets Smarter the More You Use It
+The system tracks whether memories recalled by the AI are actually used. Used memories are reinforced; ignored ones gradually fade out.
 
 ---
 
@@ -76,7 +126,7 @@ SearchEngine: Long-term memory retrieval (emotion × scene × time)
 DiversityWatchdog: Diversity injection (echo chamber prevention)
     │
     ▼
-Frontman: Context prompt assembly + response generation
+Frontman: Context assembly + response generation
     │
     ▼
 WorkingMemory update → transfer to long-term memory after 10 turns
@@ -85,92 +135,138 @@ WorkingMemory update → transfer to long-term memory after 10 turns
 Feedback loop: update memory weights based on reference history
 ```
 
-### Working Memory
+### Dual-Agent Structure
 
-Modeled after the **prefrontal cortex working memory**, the `WorkingMemory` module stores the last 10 conversation turns verbatim in a FIFO buffer:
+| Agent | Role |
+|---|---|
+| **Backman** | Behind the scenes: emotion tagging, memory retrieval, feedback evaluation, diversity monitoring |
+| **Frontman** | Front stage: handles user dialogue; responds based on the context assembled by Backman |
 
-- **Raw storage**: user input and AI response are preserved as-is (no compression)
-- **FIFO eviction**: when the 10-turn limit is reached, the oldest turn is evicted
-- **Transfer to long-term memory**: evicted turns are passed to Backman for emotion tagging, then stored in the SQLite long-term DB
-- **Always fresh context**: the working memory always holds the most recent conversation context
+Since Backman handles only emotion analysis, a lightweight model (e.g., Haiku) is sufficient.
 
-This two-tier design mirrors biological memory — short-term buffers provide immediate context, while long-term storage accumulates semantically enriched memories.
+### Two-Tier Memory
 
-### Pin Memory
+| Tier | Biological Analogy | Function |
+|---|---|---|
+| **Working Memory** | Prefrontal cortex | Stores last 10 turns verbatim (persisted in SQLite). No compression. |
+| **Long-Term Memory** | Hippocampus → Neocortex | Permanent storage of emotion+scene-tagged memories. No physical deletion. |
 
-The `PinMemory` module lets users explicitly anchor information into a maximum of **3 slots**, modeled after the **active maintenance** function of the prefrontal cortex:
+### 3-Axis Tagging
 
-- **Explicit pinning**: triggered by keywords such as "remember this", "don't forget", "pin this"
-- **TTL-based expiry**: each pin has a turn-count TTL; when expired, the system prompts the user to confirm renewal or release
-- **Slot release**: released pins are transferred to long-term memory with elevated relevance score (`2.0`)
-- **Priority in recall**: pinned memories use an extended half-life, keeping them highly weighted in search
+| Axis | Dimensions | Details |
+|---|---|---|
+| **Emotion** | 10 axes | joy / sadness / anger / fear / surprise / disgust / trust / anticipation + importance / urgency |
+| **Scene** | 8 tags | work / relationship / hobby / health / learning / daily / philosophy / meta |
+| **Time** | Decay function | `0.5^(days / half_life)` — more recent memories are weighted higher |
 
 ---
 
-## Installation
+## Setup
+
+### 1. Installation
 
 ```bash
 git clone https://github.com/NOBI327/amygdala.git
 cd amygdala
 pip install -r requirements.txt
 pip install mcp  # required for MCP server
-export ANTHROPIC_API_KEY=your_key
 ```
+
+### 2. Set Your API Key
+
+```bash
+# Add to your shell config (.bashrc / .zshrc / etc.)
+export ANTHROPIC_API_KEY="sk-ant-..."
+```
+
+> **Security Note**
+> - Manage your API key via environment variables. Direct inclusion in config files (`.claude.json`, etc.) is **not recommended**.
+> - If you use a `.env` file, make sure it is listed in `.gitignore`.
+> - This repository's `.gitignore` already includes `.env` and `.claude.json`.
+
+### 3. Register the MCP Server with Claude Code
+
+**Option A: CLI command (recommended)**
+
+```bash
+claude mcp add emotion-memory \
+  -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
+  --scope user \
+  -- python -m src.mcp_server
+```
+
+Using `--scope user` makes Amygdala available from any project. Switch to `--scope local` to limit it to a specific project.
+
+**Option B: Edit the config file directly**
+
+Claude Code (`~/.claude/settings.json`):
+
+```json
+{
+  "mcpServers": {
+    "emotion-memory": {
+      "command": "python",
+      "args": ["-m", "src.mcp_server"],
+      "cwd": "/path/to/amygdala"
+    }
+  }
+}
+```
+
+Claude Desktop (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "emotion-memory": {
+      "command": "python",
+      "args": ["-m", "src.mcp_server"],
+      "cwd": "/path/to/amygdala"
+    }
+  }
+}
+```
+
+> **Note**: Do not write API keys directly into config files. Pass them via environment variable using `-e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY` (CLI) or by pre-setting `export` in your shell.
+
+### 4. Verify Connection
+
+```bash
+claude          # Launch Claude Code
+/mcp            # Check MCP connection status
+```
+
+If you see `emotion-memory: connected`, you're good to go.
 
 ### Environment Variables
 
 | Variable | Default | Description |
-|----------|---------|-------------|
+|---|---|---|
 | ANTHROPIC_API_KEY | (required) | Anthropic API key |
 | EMS_BACKMAN_MODEL | claude-haiku-4-5-20251001 | Backman model |
 | EMS_FRONTMAN_MODEL | claude-haiku-4-5-20251001 | Frontman model |
 | EMS_DB_PATH | memory.db | SQLite DB file path |
 
----
+### Troubleshooting
 
-## MCP Setup
-
-This system can be used as an MCP server from Claude Code.
-
-### Claude Code (~/.claude/settings.json)
-
-```json
-{
-  "mcpServers": {
-    "emotion-memory": {
-      "command": "python",
-      "args": ["-m", "src.mcp_server"],
-      "cwd": "/path/to/amygdala"
-    }
-  }
-}
-```
-
-### Claude Desktop (claude_desktop_config.json)
-
-```json
-{
-  "mcpServers": {
-    "emotion-memory": {
-      "command": "python",
-      "args": ["-m", "src.mcp_server"],
-      "cwd": "/path/to/amygdala"
-    }
-  }
-}
-```
-
-After configuration, restart Claude Code / Claude Desktop to activate the MCP tools.
+| Symptom | Cause | Fix |
+|------|------|------|
+| `/mcp` does not show `connected` | Incorrect path | Check that `cwd` points to the amygdala root directory |
+| `ANTHROPIC_API_KEY not set` | Environment variable not passed | Pass explicitly with `-e ANTHROPIC_API_KEY=...` or add `export` to `.bashrc` |
+| Tools not listed | Claude Code is outdated | Run `claude update` to upgrade |
+| Memories not recalled | DB is empty | First ~10 turns are the memory accumulation phase; it starts working after that |
 
 ---
 
 ## Usage
 
-### MCP Tool Calls (Claude Code Integration)
+### MCP Tools (Claude Code Integration)
+
+Once registered as an MCP server, Claude Code automatically selects the appropriate tool based on conversation context. You do not need to invoke tools explicitly.
 
 ```
-# Store a memory
-store_memory: "Today's code review went great. I feel the team's trust has grown."
+# Store a memory (Claude Code decides when to save based on conversation)
+store_memory: "Today's code review was great. I feel the team's trust has grown."
 
 # Retrieve memories (by emotional similarity)
 recall_memories: "Good things that happened at work recently"
@@ -179,42 +275,59 @@ recall_memories: "Good things that happened at work recently"
 get_stats: {}
 ```
 
+> **How it works**: Claude Code reads the MCP tool descriptions and calls them at appropriate moments based on conversation context. Just "have a normal conversation" and Amygdala works in the background — though the frequency and timing of tool calls are determined by Claude Code.
+
 ### Standalone Mode
 
 ```bash
-# Interactive demo
 python -m src.frontman
-
-# Or
+# or
 python scripts/demo.py
-```
-
-Example session:
-
-```
-You: Remember this: my birthday is March 15
-AI: Got it. Saved to pin memory.
-
-You: About that birthday thing earlier...
-AI: You mean March 15th, your birthday. [Response referencing the memory]
 ```
 
 ---
 
-## Implementation Status (Phase 1–3)
+## Technical Background
+
+### Why Emotion?
+
+Traditional LLM memory (RAG, MemGPT, etc.) relies solely on text semantic similarity and **has no basis for judging what is important**. In the human brain, the amygdala and hippocampus use "emotion" to evaluate and associate memory importance. This system borrows that biological mechanism as an engineering pattern.
+
+### Re-tagging (Reconsolidation)
+
+Each time a memory is recalled, only its emotional **intensity** is adjusted (direction is preserved). This corresponds to the neuroscientific concept of memory reconsolidation.
+
+**Important:** Emotion vector blending (mixing) is not performed. Simulations in v0.4 confirmed that blending causes all memories' emotions to converge to the mean over iterations, collapsing retrieval resolution.
+
+### Background on Design Decisions
+
+This system originally attempted to implement constant gravitational attraction between memories via N-body simulation ("emotion gravity field"). After 7 simulations:
+
+| Attempted Approach | Reason for Rejection |
+|---|---|
+| Constant N-body simulation | Black hole effect (all memories converge to one point) |
+| Lennard-Jones equilibrium model | Spheroidization (loss of associative retrieval) |
+| Emotion vector blending | Iterative convergence of all vectors to mean |
+
+Lesson: Associative recall should be treated not as a constant physical force, but as **an event that occurs only at retrieval time**.
+
+See [proposal v0.4](docs/emotion-memory-system-proposal-v0.4.md) for details.
+
+---
+
+## Implementation Status
 
 | Phase | Content | Tests | Status |
-|-------|---------|-------|--------|
-| Phase 1 | MVP (8 modules: DB/Backman/Frontman/WorkingMemory/PinMemory/SearchEngine/Config/MemorySystem) | 77 PASS | Done |
-| Phase 2 | Feedback loop + diversity control (DiversityWatchdog/ConsolidationEngine/implicit feedback) | 108 PASS | Done |
-| Phase 3 | MCP server + multi-provider LLM (LLMAdapter/MCPServer) | — | Done |
+|---|---|---|---|
+| Phase 1 | MVP — DB / Backman / Frontman / WorkingMemory / PinMemory / SearchEngine / Config / MemorySystem | 77 PASS | Done |
+| Phase 2 | Feedback loop + diversity control — DiversityWatchdog / ConsolidationEngine / implicit feedback | 108 PASS | Done |
+| Phase 3 | MCP server + multi-provider LLM — LLMAdapter / MCPServer | 138 PASS | Done |
 
 ### Directory Structure
 
 ```
 amygdala/
 ├── src/
-│   ├── __init__.py
 │   ├── config.py             # Configuration (DI container)
 │   ├── db.py                 # DatabaseManager (SQLite)
 │   ├── backman.py            # BackmanService (emotion tagging)
@@ -225,21 +338,12 @@ amygdala/
 │   ├── reconsolidation.py    # ConsolidationEngine (Phase 2)
 │   ├── diversity_watchdog.py # DiversityWatchdog (Phase 2)
 │   ├── llm_adapter.py        # LLMAdapter (Phase 3: multi-provider)
+│   ├── mcp_server.py         # MCPServer (Phase 3: stdio transport)
 │   └── memory_system.py      # MemorySystem (orchestrator)
 ├── scripts/
-│   ├── init_db.py            # DB initialization script
-│   └── demo.py               # Interactive demo
-├── tests/
-│   ├── test_backman.py
-│   ├── test_config.py
-│   ├── test_db.py
-│   ├── test_diversity_watchdog.py
-│   ├── test_frontman.py
-│   ├── test_memory_system.py
-│   ├── test_pin_memory.py
-│   ├── test_reconsolidation.py
-│   ├── test_search_engine.py
-│   └── test_working_memory.py
+│   ├── init_db.py
+│   └── demo.py
+├── tests/                    # 138 tests, 93% coverage
 ├── docs/
 │   └── emotion-memory-system-proposal-v0.4.md
 └── requirements.txt
@@ -261,7 +365,4 @@ python -m pytest tests/ --cov=src --cov-fail-under=80
 
 MIT License
 
-Pull requests are welcome. Bug reports and feature suggestions go to GitHub Issues.
-
-- Repository: https://github.com/NOBI327/amygdala
-- Issues: https://github.com/NOBI327/amygdala/issues
+Pull Requests are welcome. Bug reports and feature suggestions go to [GitHub Issues](https://github.com/NOBI327/amygdala/issues).

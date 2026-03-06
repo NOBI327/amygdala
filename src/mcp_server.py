@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -38,9 +39,24 @@ class EmotionMemoryMCPServer:
         server = self
 
         @self.mcp.tool()
-        def store_memory(text: str, context: Optional[str] = None) -> Dict:
-            """感情タギングしてメモリをDBに保存する"""
-            return server.store_memory(text, context)
+        def store_memory(
+            text: str,
+            context: Optional[str] = None,
+            emotions: Optional[str] = None,
+            scenes: Optional[str] = None,
+        ) -> Dict:
+            """感情タギングしてメモリをDBに保存する。
+
+            emotions引数は全10軸の感情スコアをJSON文字列で渡す（0.0-1.0）。
+            省略した場合、内部LLMで自動タギングする。
+
+            感情軸: joy, sadness, anger, fear, surprise, disgust, trust, anticipation, importance, urgency
+
+            例（Claude CodeなどLLMクライアントから呼ぶ場合）:
+            emotions='{"joy":0.8,"sadness":0.0,"anger":0.0,"fear":0.0,"surprise":0.2,"disgust":0.0,"trust":0.5,"anticipation":0.3,"importance":0.6,"urgency":0.1}'
+            scenes='["work","learning"]'  # 最大3個
+            """
+            return server.store_memory(text, context, emotions, scenes)
 
         @self.mcp.tool()
         def recall_memories(query: str, top_n: int = 5) -> List:
@@ -52,24 +68,46 @@ class EmotionMemoryMCPServer:
             """メモリシステムの統計情報を返す"""
             return server.get_stats()
 
-    def store_memory(self, text: str, context: Optional[str] = None) -> Dict:
+    def store_memory(
+        self,
+        text: str,
+        context: Optional[str] = None,
+        emotions_json: Optional[str] = None,
+        scenes_json: Optional[str] = None,
+    ) -> Dict:
         """
         テキストを感情タギングしてDBに保存する。
 
         Args:
             text: 保存するテキスト
             context: オプションのコンテキスト情報
+            emotions_json: 感情スコアのJSON文字列（省略時は内部LLMでタギング）
+            scenes_json: シーンリストのJSON文字列（省略時は空リスト、最大3件）
 
         Returns:
             {"memory_id": int, "emotion": str, "score": float}
         """
         ms = self.memory_system
-        try:
-            tag_result = ms.backman.tag_emotion(text)
-            emotion = tag_result.get("emotion", {})
-        except Exception as e:
-            logger.warning(f"Emotion tagging failed: {e}. Using zero vectors.")
-            emotion = {ax: 0.0 for ax in list(ms.config.EMOTION_AXES) + list(ms.config.META_AXES)}
+        emotion = None
+
+        if emotions_json:
+            try:
+                emotion = json.loads(emotions_json)
+                all_axes = list(ms.config.EMOTION_AXES) + list(ms.config.META_AXES)
+                for ax in all_axes:
+                    val = emotion.get(ax, 0.0)
+                    emotion[ax] = max(0.0, min(1.0, float(val)))
+            except (json.JSONDecodeError, TypeError, ValueError) as e:
+                logger.warning(f"Invalid emotions_json: {e}. Falling back to backman.")
+                emotion = None
+
+        if emotion is None:
+            try:
+                tag_result = ms.backman.tag_emotion(text)
+                emotion = tag_result.get("emotion", {})
+            except Exception as e:
+                logger.warning(f"Emotion tagging failed: {e}. Using zero vectors.")
+                emotion = {ax: 0.0 for ax in list(ms.config.EMOTION_AXES) + list(ms.config.META_AXES)}
 
         dominant_emotion, dominant_score = max(
             ((ax, float(emotion.get(ax, 0.0))) for ax in ms.config.EMOTION_AXES),

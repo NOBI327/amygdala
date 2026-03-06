@@ -11,3 +11,4 @@ build/
 memory.db
 *.db
 .env
+.claude.json

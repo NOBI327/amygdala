@@ -1,4 +1,5 @@
 """LLM Adapter - Multi-provider abstraction for LLM calls."""
+import os
 from abc import ABC, abstractmethod
 from typing import Optional
 
@@ -104,6 +105,7 @@ class AdapterFactory:
         provider: str,
         model: Optional[str] = None,
         api_key: Optional[str] = None,
+        api_key_env_var: Optional[str] = None,
     ) -> LLMAdapter:
         """Create an LLM adapter for the given provider.
 
@@ -111,13 +113,25 @@ class AdapterFactory:
             provider: One of "anthropic", "openai", "gemini".
             model: Optional model name override.
             api_key: Optional API key (passed to client constructor if provided).
+            api_key_env_var: Optional environment variable name to read the API key from.
+                If set, overrides api_key. Raises ValueError if the env var is not set.
 
         Returns:
             An LLMAdapter instance.
 
         Raises:
-            ValueError: If provider is not recognized.
+            ValueError: If provider is not recognized, or if api_key_env_var is specified
+                but the environment variable is not set.
         """
+        if api_key_env_var:
+            resolved_key = os.environ.get(api_key_env_var)
+            if resolved_key is None:
+                raise ValueError(
+                    f"Environment variable {api_key_env_var!r} is not set. "
+                    "Set it before using api_key_env_var."
+                )
+            api_key = resolved_key
+
         if provider == "anthropic":
             kwargs = {}
             if model:

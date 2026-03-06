@@ -128,6 +128,86 @@ class TestStoreMemory:
         assert "emotion" in result
         assert "score" in result
 
+    def test_store_memory_with_pre_tagged_emotions(self, server, mock_memory_system):
+        """emotions_json付き -> Backman呼ばれない"""
+        emotions = '{"joy":0.8,"sadness":0.0,"anger":0.0,"fear":0.0,"surprise":0.2,"disgust":0.0,"trust":0.5,"anticipation":0.3,"importance":0.6,"urgency":0.1}'
+        scenes = '["work","learning"]'
+        mock_cursor = MagicMock()
+        mock_cursor.lastrowid = 1
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value = mock_cursor
+        mock_memory_system.db.get_connection.return_value = mock_conn
+
+        result = server.store_memory("test", emotions_json=emotions, scenes_json=scenes)
+
+        assert result["emotion"] == "joy"
+        mock_memory_system.backman.tag_emotion.assert_not_called()
+
+    def test_store_memory_without_emotions_uses_backman(self, server, mock_memory_system):
+        """emotions_json未提供 -> 従来通りBackman呼ばれる"""
+        mock_memory_system.backman.tag_emotion.return_value = {
+            "emotion": _emotion_vec(trust=0.7)
+        }
+        mock_cursor = MagicMock()
+        mock_cursor.lastrowid = 2
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value = mock_cursor
+        mock_memory_system.db.get_connection.return_value = mock_conn
+
+        server.store_memory("テスト")
+
+        mock_memory_system.backman.tag_emotion.assert_called_once_with("テスト")
+
+    def test_store_memory_invalid_emotions_falls_back(self, server, mock_memory_system):
+        """不正JSON -> フォールバック（Backman呼ばれる）"""
+        mock_memory_system.backman.tag_emotion.return_value = {
+            "emotion": _emotion_vec(joy=0.5)
+        }
+        mock_cursor = MagicMock()
+        mock_cursor.lastrowid = 3
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value = mock_cursor
+        mock_memory_system.db.get_connection.return_value = mock_conn
+
+        result = server.store_memory("テスト", emotions_json="invalid-json{{{")
+
+        assert "memory_id" in result
+        mock_memory_system.backman.tag_emotion.assert_called_once()
+
+    def test_store_memory_emotions_clamped(self, server, mock_memory_system):
+        """範囲外値(1.5等) -> 0.0-1.0クランプ"""
+        emotions = '{"joy":1.5,"sadness":-0.3,"anger":0.0,"fear":0.0,"surprise":0.0,"disgust":0.0,"trust":0.0,"anticipation":0.0,"importance":0.0,"urgency":0.0}'
+        mock_cursor = MagicMock()
+        mock_cursor.lastrowid = 4
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value = mock_cursor
+        mock_memory_system.db.get_connection.return_value = mock_conn
+
+        result = server.store_memory("テスト", emotions_json=emotions)
+
+        # Backmanは呼ばれない（valid JSONなので）
+        mock_memory_system.backman.tag_emotion.assert_not_called()
+        # joyが最大なので dominant_emotion == "joy"
+        assert result["emotion"] == "joy"
+        # クランプ後 joy=1.0
+        assert result["score"] == pytest.approx(1.0)
+
+    def test_store_memory_missing_axes_filled(self, server, mock_memory_system):
+        """軸欠落 -> 0.0で補完（全軸のバリデーションが走る）"""
+        # joy のみ指定、他は欠落
+        emotions = '{"joy":0.9}'
+        mock_cursor = MagicMock()
+        mock_cursor.lastrowid = 5
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value = mock_cursor
+        mock_memory_system.db.get_connection.return_value = mock_conn
+
+        result = server.store_memory("テスト", emotions_json=emotions)
+
+        mock_memory_system.backman.tag_emotion.assert_not_called()
+        assert result["emotion"] == "joy"
+        assert result["score"] == pytest.approx(0.9)
+
 
 # ─── recall_memories ─────────────────────────────────────────────────────────
 
