@@ -12,3 +12,4 @@ memory.db
 *.db
 .env
 .claude.json
+.mcp.json
