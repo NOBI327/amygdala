@@ -11,10 +11,17 @@ MIT License / OSS
 
 ## Why Emotion-Based Memory is Revolutionary
 
-Traditional LLM memory retrieves memories only by text similarity. Human memory, however, is tied to emotion.
-This system encodes memories as multi-dimensional vectors across 8 emotional axes —
-**joy / sadness / anger / fear / surprise / disgust / trust / anticipation** — plus 2 meta-axes (importance and urgency).
-This allows the system to prioritize emotionally resonant memories during recall.
+Traditional LLM memory retrieves memories only by text similarity. Human memory, however, is anchored not just to emotions, but to scenes and time.
+
+This system encodes memories as multi-dimensional vectors across **three axes**:
+
+| Axis | Dimensions | Details |
+|------|-----------|---------|
+| **Emotion** | 10 axes | joy / sadness / anger / fear / surprise / disgust / trust / anticipation + importance / urgency |
+| **Scene** | 8 tags | work / relationship / hobby / health / learning / daily / philosophy / meta |
+| **Time** | decay function | `0.5 ^ (days / half_life)` — recent memories are weighted more heavily |
+
+During recall, the composite score combines all three axes, allowing the system to surface memories that are emotionally relevant, contextually appropriate, and temporally recent.
 
 In addition, the **DiversityWatchdog** (Phase 2) prevents echo chambers (repeated retrieval of the same memory),
 and the feedback loop reinforces memories that are actually referenced.
@@ -78,13 +85,33 @@ WorkingMemory update → transfer to long-term memory after 10 turns
 Feedback loop: update memory weights based on reference history
 ```
 
+### Working Memory
+
+Modeled after the **prefrontal cortex working memory**, the `WorkingMemory` module stores the last 10 conversation turns verbatim in a FIFO buffer:
+
+- **Raw storage**: user input and AI response are preserved as-is (no compression)
+- **FIFO eviction**: when the 10-turn limit is reached, the oldest turn is evicted
+- **Transfer to long-term memory**: evicted turns are passed to Backman for emotion tagging, then stored in the SQLite long-term DB
+- **Always fresh context**: the working memory always holds the most recent conversation context
+
+This two-tier design mirrors biological memory — short-term buffers provide immediate context, while long-term storage accumulates semantically enriched memories.
+
+### Pin Memory
+
+The `PinMemory` module lets users explicitly anchor information into a maximum of **3 slots**, modeled after the **active maintenance** function of the prefrontal cortex:
+
+- **Explicit pinning**: triggered by keywords such as "remember this", "don't forget", "pin this"
+- **TTL-based expiry**: each pin has a turn-count TTL; when expired, the system prompts the user to confirm renewal or release
+- **Slot release**: released pins are transferred to long-term memory with elevated relevance score (`2.0`)
+- **Priority in recall**: pinned memories use an extended half-life, keeping them highly weighted in search
+
 ---
 
 ## Installation
 
 ```bash
-git clone https://github.com/NOBI327/emotion-gravity-field-proposal.git
-cd emotion-gravity-field-proposal
+git clone https://github.com/NOBI327/amygdala.git
+cd amygdala
 pip install -r requirements.txt
 pip install mcp  # required for MCP server
 export ANTHROPIC_API_KEY=your_key
@@ -113,7 +140,7 @@ This system can be used as an MCP server from Claude Code.
     "emotion-memory": {
       "command": "python",
       "args": ["-m", "src.mcp_server"],
-      "cwd": "/path/to/emotion-gravity-field-proposal"
+      "cwd": "/path/to/amygdala"
     }
   }
 }
@@ -127,7 +154,7 @@ This system can be used as an MCP server from Claude Code.
     "emotion-memory": {
       "command": "python",
       "args": ["-m", "src.mcp_server"],
-      "cwd": "/path/to/emotion-gravity-field-proposal"
+      "cwd": "/path/to/amygdala"
     }
   }
 }
@@ -185,7 +212,7 @@ AI: You mean March 15th, your birthday. [Response referencing the memory]
 ### Directory Structure
 
 ```
-emotion-gravity-field-proposal/
+amygdala/
 ├── src/
 │   ├── __init__.py
 │   ├── config.py             # Configuration (DI container)
@@ -236,5 +263,5 @@ MIT License
 
 Pull requests are welcome. Bug reports and feature suggestions go to GitHub Issues.
 
-- Repository: https://github.com/NOBI327/emotion-gravity-field-proposal
-- Issues: https://github.com/NOBI327/emotion-gravity-field-proposal/issues
+- Repository: https://github.com/NOBI327/amygdala
+- Issues: https://github.com/NOBI327/amygdala/issues
