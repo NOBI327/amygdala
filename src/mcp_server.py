@@ -22,11 +22,15 @@ class EmotionMemoryMCPServer:
 
     def __init__(self, memory_system: Optional[Any] = None) -> None:
         if memory_system is None:
-            import anthropic
+            import os
             config = Config()
             db = DatabaseManager.from_config(config)
             db.init()
-            llm_client = anthropic.Anthropic()
+            if os.environ.get("ANTHROPIC_API_KEY"):
+                import anthropic
+                llm_client = anthropic.Anthropic()
+            else:
+                llm_client = None  # タギングはゼロベクトルフォールバック
             self.memory_system = MemorySystem(llm_client, db, config)
         else:
             self.memory_system = memory_system

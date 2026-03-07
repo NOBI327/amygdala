@@ -103,6 +103,9 @@ JSON出力（以下の形式のみ）:
         Raises:
             ValueError: LLMの出力がJSON解析不可能な場合
         """
+        if self.adapter is None:
+            logger.warning("LLM adapter not set. Returning zero vector.")
+            return {k: 0.0 for k in ["joy", "sadness", "anger", "fear", "surprise", "disgust", "trust", "anticipation", "importance", "urgency"]}
         prompt = self._build_tagging_prompt(text)
         try:
             raw = self.adapter.generate(
@@ -135,6 +138,8 @@ JSON出力（以下の形式のみ）:
             サマリテキスト（200-300文字程度）
         """
         if not turns:
+            return ""
+        if self.adapter is None:
             return ""
         conv_text = ""
         for t in turns:
