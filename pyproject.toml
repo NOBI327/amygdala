@@ -1,0 +1,15 @@
+[project]
+name = "amygdala"
+version = "0.1.0"
+description = "Emotion-based memory system for LLMs"
+requires-python = ">=3.11"
+
+[tool.setuptools]
+packages = ["amygdala"]
+
+[tool.setuptools.package-dir]
+amygdala = "src"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=src --cov-report=term-missing -q"
