@@ -97,6 +97,40 @@ class GeminiAdapter(LLMAdapter):
         return response.text
 
 
+class ClaudeCodeAdapter(LLMAdapter):
+    """Adapter using Claude Code CLI — uses Max plan tokens without API key."""
+
+    def __init__(self, timeout: int = 120):
+        self._timeout = timeout
+
+    def generate(self, prompt: str, system: Optional[str] = None, model: Optional[str] = None) -> str:
+        import subprocess
+        full_prompt = f"{system}\n\n{prompt}" if system else prompt
+        cmd = ["claude", "-p", full_prompt, "--output-format", "text", "--max-turns", "1"]
+
+        env = os.environ.copy()
+        env.pop("CLAUDECODE", None)
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=self._timeout,
+                env=env,
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(f"claude CLI timed out ({self._timeout}s)")
+        except FileNotFoundError:
+            raise RuntimeError("claude CLI not found. Is Claude Code installed?")
+
+        if result.returncode != 0:
+            raise RuntimeError(f"claude CLI failed (exit {result.returncode}): {result.stderr}")
+
+        return result.stdout.strip()
+
+
 class AdapterFactory:
     """Factory for creating LLM adapters."""
 

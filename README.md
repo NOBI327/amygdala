@@ -4,7 +4,7 @@
 
 [![日本語](https://img.shields.io/badge/lang-ja-blue)](README_ja.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-146%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-147%20passed-brightgreen)]()
 [![Coverage](https://img.shields.io/badge/coverage-93%25-brightgreen)]()
 
 ---
@@ -95,7 +95,7 @@ graph TD
     end
 
     LongTermDB[("LongTermDB\nSQLite")]
-    LLMAdapter["LLMAdapter\nAnthropic / OpenAI / Gemini (Phase 3)"]
+    LLMAdapter["LLMAdapter\nAnthropic / OpenAI / Gemini / Claude Code CLI"]
     MCPServer["MCPServer\nstdio transport (Phase 3)"]
 
     Backman --> LLMAdapter
@@ -172,7 +172,11 @@ pip install -r requirements.txt
 pip install mcp  # required for MCP server
 ```
 
-### 2. Set Your API Key
+### 2. Set Your API Key (Optional)
+
+If `ANTHROPIC_API_KEY` is not set, Amygdala automatically falls back to Claude Code CLI (`claude -p`), using your Max plan's included tokens at no extra cost.
+
+To use the Anthropic API directly instead (lower latency):
 
 ```bash
 # Add to your shell config (.bashrc / .zshrc / etc.)
@@ -279,7 +283,7 @@ This only needs to be run once per project.
 
 | Variable | Default | Description |
 |---|---|---|
-| ANTHROPIC_API_KEY | (required) | Anthropic API key |
+| ANTHROPIC_API_KEY | (optional) | Anthropic API key. If unset, falls back to Claude Code CLI |
 | EMS_BACKMAN_MODEL | claude-haiku-4-5-20251001 | Backman model |
 | EMS_FRONTMAN_MODEL | claude-haiku-4-5-20251001 | Frontman model |
 | EMS_DB_PATH | memory.db | SQLite DB file path |
@@ -289,7 +293,7 @@ This only needs to be run once per project.
 | Symptom | Cause | Fix |
 |------|------|------|
 | `/mcp` does not show `connected` | Incorrect path | Check that `cwd` points to the amygdala root directory |
-| `ANTHROPIC_API_KEY not set` | Environment variable not passed | Pass explicitly with `-e ANTHROPIC_API_KEY=...` or add `export` to `.bashrc` |
+| Emotion scores always 0 | LLM adapter not connected | Verify Claude Code CLI is installed (`claude --version`), or set `ANTHROPIC_API_KEY` |
 | Tools not listed | Claude Code is outdated | Run `claude update` to upgrade |
 | Memories not recalled | DB is empty | First ~10 turns are the memory accumulation phase; it starts working after that |
 
@@ -359,7 +363,7 @@ See [proposal v0.4](docs/emotion-memory-system-proposal-v0.4.md) for details.
 | Phase 1 | MVP — DB / Backman / Frontman / WorkingMemory / PinMemory / SearchEngine / Config / MemorySystem | 77 PASS | Done |
 | Phase 2 | Feedback loop + diversity control — DiversityWatchdog / ConsolidationEngine / implicit feedback | 108 PASS | Done |
 | Phase 3 | MCP server + multi-provider LLM — LLMAdapter / MCPServer | 138 PASS | Done |
-| Phase 4 | API-keyless delegation + security hardening + README overhaul + eval infrastructure | 146 PASS | Done |
+| Phase 4 | API-keyless delegation + security hardening + README overhaul + eval infrastructure | 147 PASS | Done |
 
 ### Directory Structure
 
@@ -385,7 +389,7 @@ amygdala/
 │   ├── run_labeling.sh        # Labeling workflow runner (Phase 4)
 │   ├── export_recall_log.py   # recall_log CSV exporter (Phase 4)
 │   └── accuracy_report.py     # Accuracy report generator (Phase 4)
-├── tests/                    # 146 tests, 93% coverage
+├── tests/                    # 147 tests, 93% coverage
 ├── docs/
 │   └── emotion-memory-system-proposal-v0.4.md
 └── requirements.txt

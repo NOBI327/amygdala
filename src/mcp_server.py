@@ -27,10 +27,13 @@ class EmotionMemoryMCPServer:
             db = DatabaseManager.from_config(config)
             db.init()
             if os.environ.get("ANTHROPIC_API_KEY"):
-                import anthropic
-                llm_client = anthropic.Anthropic()
+                from .llm_adapter import AnthropicAdapter
+                llm_client = AnthropicAdapter(default_model=config.BACKMAN_MODEL)
             else:
-                llm_client = None  # タギングはゼロベクトルフォールバック
+                # APIキーなし → Claude Code CLI経由（Maxプラン定額トークン使用）
+                from .llm_adapter import ClaudeCodeAdapter
+                llm_client = ClaudeCodeAdapter(timeout=120)
+                logger.info("ANTHROPIC_API_KEY not set. Using Claude Code CLI adapter.")
             self.memory_system = MemorySystem(llm_client, db, config)
         else:
             self.memory_system = memory_system

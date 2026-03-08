@@ -4,7 +4,7 @@
 
 [![English](https://img.shields.io/badge/lang-en-blue)](README.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-146%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-147%20passed-brightgreen)]()
 [![Coverage](https://img.shields.io/badge/coverage-93%25-brightgreen)]()
 
 ---
@@ -95,7 +95,7 @@ graph TD
     end
 
     LongTermDB[("LongTermDB\nSQLite")]
-    LLMAdapter["LLMAdapter\nAnthropic / OpenAI / Gemini (Phase 3)"]
+    LLMAdapter["LLMAdapter\nAnthropic / OpenAI / Gemini / Claude Code CLI"]
     MCPServer["MCPServer\nstdio transport (Phase 3)"]
 
     Backman --> LLMAdapter
@@ -172,7 +172,11 @@ pip install -r requirements.txt
 pip install mcp  # MCPサーバー使用時
 ```
 
-### 2. APIキーの設定
+### 2. APIキーの設定（任意）
+
+`ANTHROPIC_API_KEY` が未設定の場合、AmygdalaはClaude Code CLI（`claude -p`）に自動フォールバックし、Maxプランの定額トークンを使用します。追加コストは発生しません。
+
+Anthropic APIを直接使用する場合（低レイテンシ）：
 
 ```bash
 # シェルの設定ファイルに追記（.bashrc / .zshrc 等）
@@ -279,7 +283,7 @@ python setup_permissions.py
 
 | 変数名 | デフォルト | 説明 |
 |---|---|---|
-| ANTHROPIC_API_KEY | (必須) | Anthropic APIキー |
+| ANTHROPIC_API_KEY | (任意) | Anthropic APIキー。未設定時はClaude Code CLIにフォールバック |
 | EMS_BACKMAN_MODEL | claude-haiku-4-5-20251001 | Backmanモデル |
 | EMS_FRONTMAN_MODEL | claude-haiku-4-5-20251001 | Frontmanモデル |
 | EMS_DB_PATH | memory.db | SQLite DBファイルパス |
@@ -289,7 +293,7 @@ python setup_permissions.py
 | 症状 | 原因 | 対処 |
 |------|------|------|
 | `/mcp` で connected にならない | パスが間違っている | `cwd` がamygdalaのルートディレクトリを指しているか確認 |
-| `ANTHROPIC_API_KEY not set` | 環境変数が渡っていない | `-e ANTHROPIC_API_KEY=...` で明示的に渡す、または `.bashrc` に追記 |
+| 感情スコアが常に0 | LLMアダプター未接続 | Claude Code CLIがインストール済みか確認（`claude --version`）、または `ANTHROPIC_API_KEY` を設定 |
 | ツールが表示されない | Claude Codeが古い | `claude update` で最新版に更新 |
 | 記憶が想起されない | DBが空 | 最初の10ターン程度は記憶蓄積期間。使い続けると機能し始める |
 
@@ -359,7 +363,7 @@ python scripts/demo.py
 | Phase 1 | MVP — DB / Backman / Frontman / WorkingMemory / PinMemory / SearchEngine / Config / MemorySystem | 77件 PASS | 完了 |
 | Phase 2 | フィードバックループ + 多様性制御 — DiversityWatchdog / ConsolidationEngine / 暗黙的フィードバック | 108件 PASS | 完了 |
 | Phase 3 | MCPサーバー + マルチプロバイダLLM — LLMAdapter / MCPServer | 138件 PASS | 完了 |
-| Phase 4 | APIキーレス委任 + 保安強化 + README改訂 + フィードバック実測基盤 | 146件 PASS | 完了 |
+| Phase 4 | APIキーレス委任 + 保安強化 + README改訂 + フィードバック実測基盤 | 147件 PASS | 完了 |
 
 ### ディレクトリ構成
 
@@ -385,7 +389,7 @@ amygdala/
 │   ├── run_labeling.sh        # ラベリング実行スクリプト（Phase 4）
 │   ├── export_recall_log.py   # recall_log CSVエクスポーター（Phase 4）
 │   └── accuracy_report.py     # 精度レポート自動生成（Phase 4）
-├── tests/                    # 146テスト、93%カバレッジ
+├── tests/                    # 147テスト、93%カバレッジ
 ├── docs/
 │   └── emotion-memory-system-proposal-v0.4.md
 └── requirements.txt
