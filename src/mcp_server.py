@@ -38,6 +38,16 @@ class EmotionMemoryMCPServer:
         self.mcp = FastMCP("EmotionMemoryServer")
         self._register_tools()
 
+    def _tick_pin_ttl(self) -> List[Dict]:
+        """ツール呼び出し毎にピンTTLを1減算し、期限切れピンを返す。
+
+        ユーザー入力1回 ≒ MCPツール呼び出し1回とみなす。
+        期限切れピンがあればレスポンスに確認プロンプトを含める。
+        """
+        pm = self.memory_system.pin_memory
+        expired = pm.decrement_ttl()
+        return expired
+
     def _register_tools(self) -> None:
         """FastMCPにツールを登録する"""
         server = self
@@ -46,25 +56,30 @@ class EmotionMemoryMCPServer:
         def store_memory(
             text: str,
             context: Optional[str] = None,
-            emotions: Optional[str] = None,
-            scenes: Optional[str] = None,
+            emotions: Optional[Dict[str, float]] = None,
+            scenes: Optional[List[str]] = None,
         ) -> Dict:
             """感情タギングしてメモリをDBに保存する。
 
-            emotions引数は全10軸の感情スコアをJSON文字列で渡す（0.0-1.0）。
+            emotions引数は全10軸の感情スコアをdictで渡す(0.0-1.0)。
             省略した場合、内部LLMで自動タギングする。
 
             感情軸: joy, sadness, anger, fear, surprise, disgust, trust, anticipation, importance, urgency
 
-            例（Claude CodeなどLLMクライアントから呼ぶ場合）:
-            emotions='{"joy":0.8,"sadness":0.0,"anger":0.0,"fear":0.0,"surprise":0.2,"disgust":0.0,"trust":0.5,"anticipation":0.3,"importance":0.6,"urgency":0.1}'
-            scenes='["work","learning"]'  # 最大3個
+            例(Claude CodeなどLLMクライアントから呼ぶ場合):
+            emotions={"joy":0.8,"sadness":0.0,"anger":0.0,"fear":0.0,"surprise":0.2,"disgust":0.0,"trust":0.5,"anticipation":0.3,"importance":0.6,"urgency":0.1}
+            scenes=["work","learning"]  # 最大3個
             """
-            return server.store_memory(text, context, emotions, scenes)
+            result = server.store_memory(text, context, emotions, scenes)
+            expired = server._tick_pin_ttl()
+            if expired:
+                result["pin_ttl_expired"] = server.memory_system.pin_memory.generate_ttl_prompt(expired)
+            return result
 
         @self.mcp.tool()
         def recall_memories(query: str, top_n: int = 5) -> List:
             """感情ベース検索でメモリを取得する"""
+            server._tick_pin_ttl()
             return server.recall_memories(query, top_n)
 
         @self.mcp.tool()
@@ -72,12 +87,33 @@ class EmotionMemoryMCPServer:
             """メモリシステムの統計情報を返す"""
             return server.get_stats()
 
+        @self.mcp.tool()
+        def pin_memory(content: str, label: str = "") -> Dict:
+            """メモリをピン固定する（ワーキングメモリに常駐）。
+
+            スロット上限あり。満杯の場合はエラーを返す。
+            """
+            return server.pin_memory(content, label)
+
+        @self.mcp.tool()
+        def unpin_memory(pin_id: int) -> Dict:
+            """ピンを解除し、長期記憶へ移管する。
+
+            pin_idはlist_pinned_memoriesで確認できる。
+            """
+            return server.unpin_memory(pin_id)
+
+        @self.mcp.tool()
+        def list_pinned_memories() -> List:
+            """ピン固定中のメモリ一覧を返す"""
+            return server.list_pinned_memories()
+
     def store_memory(
         self,
         text: str,
         context: Optional[str] = None,
-        emotions_json: Optional[str] = None,
-        scenes_json: Optional[str] = None,
+        emotions_input: Optional[Any] = None,
+        scenes_input: Optional[Any] = None,
     ) -> Dict:
         """
         テキストを感情タギングしてDBに保存する。
@@ -85,8 +121,8 @@ class EmotionMemoryMCPServer:
         Args:
             text: 保存するテキスト
             context: オプションのコンテキスト情報
-            emotions_json: 感情スコアのJSON文字列（省略時は内部LLMでタギング）
-            scenes_json: シーンリストのJSON文字列（省略時は空リスト、最大3件）
+            emotions_input: 感情スコア（dict or JSON文字列、省略時は内部LLMでタギング）
+            scenes_input: シーンリスト（list or JSON文字列、省略時は空リスト、最大3件）
 
         Returns:
             {"memory_id": int, "emotion": str, "score": float}
@@ -94,15 +130,20 @@ class EmotionMemoryMCPServer:
         ms = self.memory_system
         emotion = None
 
-        if emotions_json:
+        if emotions_input:
             try:
-                emotion = json.loads(emotions_json)
+                if isinstance(emotions_input, str):
+                    emotion = json.loads(emotions_input)
+                elif isinstance(emotions_input, dict):
+                    emotion = emotions_input
+                else:
+                    raise TypeError(f"Unsupported type: {type(emotions_input)}")
                 all_axes = list(ms.config.EMOTION_AXES) + list(ms.config.META_AXES)
                 for ax in all_axes:
                     val = emotion.get(ax, 0.0)
                     emotion[ax] = max(0.0, min(1.0, float(val)))
             except (json.JSONDecodeError, TypeError, ValueError) as e:
-                logger.warning(f"Invalid emotions_json: {e}. Falling back to backman.")
+                logger.warning(f"Invalid emotions_input: {e}. Falling back to backman.")
                 emotion = None
 
         if emotion is None:
@@ -219,6 +260,47 @@ class EmotionMemoryMCPServer:
             "diversity_index": diversity_index,
             "pinned_count": pinned,
         }
+
+    def pin_memory(self, content: str, label: str = "") -> Dict:
+        """ピンメモリを追加する"""
+        pm = self.memory_system.pin_memory
+        if pm.is_full():
+            return {"error": "Pin slots full", "max_slots": self.memory_system.config.PIN_MEMORY_SLOTS}
+        success = pm.add_pin(content, label)
+        if success:
+            pins = pm.get_active_pins()
+            new_pin = pins[-1] if pins else {}
+            return {
+                "pin_id": new_pin.get("id"),
+                "content": content,
+                "label": label,
+                "slots_used": pm.slot_count(),
+                "max_slots": self.memory_system.config.PIN_MEMORY_SLOTS,
+            }
+        return {"error": "Failed to add pin"}
+
+    def unpin_memory(self, pin_id: int) -> Dict:
+        """ピンを解除し長期記憶へ移管する"""
+        pm = self.memory_system.pin_memory
+        try:
+            memory_id = pm.release_pin(pin_id)
+            return {"released_pin_id": pin_id, "migrated_to_memory_id": memory_id}
+        except ValueError as e:
+            return {"error": str(e)}
+
+    def list_pinned_memories(self) -> List[Dict]:
+        """アクティブなピン一覧を返す"""
+        pm = self.memory_system.pin_memory
+        pins = pm.get_active_pins()
+        return [
+            {
+                "pin_id": p["id"],
+                "content": p["content"],
+                "label": p.get("label", ""),
+                "ttl_remaining": p.get("ttl_turns_remaining"),
+            }
+            for p in pins
+        ]
 
     def _get_dominant_emotion(self, memory: Dict, config: Config) -> str:
         """メモリDictから支配的な感情軸名を返す。

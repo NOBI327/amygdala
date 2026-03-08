@@ -128,8 +128,8 @@ class TestStoreMemory:
         assert "emotion" in result
         assert "score" in result
 
-    def test_store_memory_with_pre_tagged_emotions(self, server, mock_memory_system):
-        """emotions_json付き -> Backman呼ばれない"""
+    def test_store_memory_with_pre_tagged_emotions_str(self, server, mock_memory_system):
+        """emotions JSON文字列付き -> Backman呼ばれない"""
         emotions = '{"joy":0.8,"sadness":0.0,"anger":0.0,"fear":0.0,"surprise":0.2,"disgust":0.0,"trust":0.5,"anticipation":0.3,"importance":0.6,"urgency":0.1}'
         scenes = '["work","learning"]'
         mock_cursor = MagicMock()
@@ -138,7 +138,22 @@ class TestStoreMemory:
         mock_conn.execute.return_value = mock_cursor
         mock_memory_system.db.get_connection.return_value = mock_conn
 
-        result = server.store_memory("test", emotions_json=emotions, scenes_json=scenes)
+        result = server.store_memory("test", emotions_input=emotions, scenes_input=scenes)
+
+        assert result["emotion"] == "joy"
+        mock_memory_system.backman.tag_emotion.assert_not_called()
+
+    def test_store_memory_with_pre_tagged_emotions_dict(self, server, mock_memory_system):
+        """emotions dict付き -> Backman呼ばれない（MCPクライアント経由）"""
+        emotions = {"joy": 0.8, "sadness": 0.0, "anger": 0.0, "fear": 0.0, "surprise": 0.2, "disgust": 0.0, "trust": 0.5, "anticipation": 0.3, "importance": 0.6, "urgency": 0.1}
+        scenes = ["work", "learning"]
+        mock_cursor = MagicMock()
+        mock_cursor.lastrowid = 1
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value = mock_cursor
+        mock_memory_system.db.get_connection.return_value = mock_conn
+
+        result = server.store_memory("test", emotions_input=emotions, scenes_input=scenes)
 
         assert result["emotion"] == "joy"
         mock_memory_system.backman.tag_emotion.assert_not_called()
@@ -169,7 +184,7 @@ class TestStoreMemory:
         mock_conn.execute.return_value = mock_cursor
         mock_memory_system.db.get_connection.return_value = mock_conn
 
-        result = server.store_memory("テスト", emotions_json="invalid-json{{{")
+        result = server.store_memory("テスト", emotions_input="invalid-json{{{")
 
         assert "memory_id" in result
         mock_memory_system.backman.tag_emotion.assert_called_once()
@@ -183,7 +198,7 @@ class TestStoreMemory:
         mock_conn.execute.return_value = mock_cursor
         mock_memory_system.db.get_connection.return_value = mock_conn
 
-        result = server.store_memory("テスト", emotions_json=emotions)
+        result = server.store_memory("テスト", emotions_input=emotions)
 
         # Backmanは呼ばれない（valid JSONなので）
         mock_memory_system.backman.tag_emotion.assert_not_called()
@@ -202,7 +217,7 @@ class TestStoreMemory:
         mock_conn.execute.return_value = mock_cursor
         mock_memory_system.db.get_connection.return_value = mock_conn
 
-        result = server.store_memory("テスト", emotions_json=emotions)
+        result = server.store_memory("テスト", emotions_input=emotions)
 
         mock_memory_system.backman.tag_emotion.assert_not_called()
         assert result["emotion"] == "joy"
