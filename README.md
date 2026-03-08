@@ -188,7 +188,7 @@ To enable API mode:
 export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
-> **Claude Code mode note**: When running without an API key, always pass `emotions` explicitly in `store_memory` and `recall_memories` calls. Claude Code itself can judge the appropriate emotion scores. Omitting `emotions` results in zero vectors and poor recall accuracy.
+> **Technical note (for integrators)**: In Claude Code mode, the MCP server cannot auto-tag emotions internally. Claude Code reads the tool descriptions and automatically provides `emotions` scores based on conversation context — no user action is required. If you are building a custom client that calls these MCP tools directly, you must provide the `emotions` parameter yourself.
 
 > **Security Note**
 > - Manage your API key via environment variables. Direct inclusion in config files (`.claude.json`, etc.) is **not recommended**.
