@@ -95,7 +95,7 @@ graph TD
     end
 
     LongTermDB[("LongTermDB\nSQLite")]
-    LLMAdapter["LLMAdapter\nAnthropic / OpenAI / Gemini / Claude Code CLI"]
+    LLMAdapter["LLMAdapter\nAnthropic / OpenAI / Gemini"]
     MCPServer["MCPServer\nstdio transport (Phase 3)"]
 
     Backman --> LLMAdapter
@@ -174,14 +174,21 @@ pip install mcp  # MCPサーバー使用時
 
 ### 2. APIキーの設定（任意）
 
-`ANTHROPIC_API_KEY` が未設定の場合、AmygdalaはClaude Code CLI（`claude -p`）に自動フォールバックし、Maxプランの定額トークンを使用します。追加コストは発生しません。
+Amygdalaは2つの動作モードに対応しています:
 
-Anthropic APIを直接使用する場合（低レイテンシ）：
+| モード | 設定 | 感情タギング |
+|---|---|---|
+| **Claude Codeモード** | APIキー不要 | Claude Codeが `emotions` パラメータで感情スコアを明示渡し（自動タギング無効） |
+| **APIモード** | `ANTHROPIC_API_KEY` を設定 | Backmanが内部で自動タギング（低レイテンシ） |
+
+APIモードを有効にする場合:
 
 ```bash
 # シェルの設定ファイルに追記（.bashrc / .zshrc 等）
 export ANTHROPIC_API_KEY="sk-ant-..."
 ```
+
+> **Claude Codeモードの注意**: APIキーなしで運用する場合、`store_memory` や `recall_memories` 呼び出し時に `emotions` を必ず明示的に渡してください。Claude Code自身が適切な感情スコアを判定できます。`emotions` を省略するとゼロベクターで保存され、検索精度が低下します。
 
 > **セキュリティ上の注意**
 > - APIキーは環境変数で管理してください。設定ファイル（`.claude.json` 等）への直接記載は**非推奨**です
@@ -283,7 +290,7 @@ python setup_permissions.py
 
 | 変数名 | デフォルト | 説明 |
 |---|---|---|
-| ANTHROPIC_API_KEY | (任意) | Anthropic APIキー。未設定時はClaude Code CLIにフォールバック |
+| ANTHROPIC_API_KEY | (任意) | Anthropic APIキー。未設定時は自動タギング無効、`emotions` の明示渡しを推奨 |
 | EMS_BACKMAN_MODEL | claude-haiku-4-5-20251001 | Backmanモデル |
 | EMS_FRONTMAN_MODEL | claude-haiku-4-5-20251001 | Frontmanモデル |
 | EMS_DB_PATH | memory.db | SQLite DBファイルパス |
@@ -293,7 +300,7 @@ python setup_permissions.py
 | 症状 | 原因 | 対処 |
 |------|------|------|
 | `/mcp` で connected にならない | パスが間違っている | `cwd` がamygdalaのルートディレクトリを指しているか確認 |
-| 感情スコアが常に0 | LLMアダプター未接続 | Claude Code CLIがインストール済みか確認（`claude --version`）、または `ANTHROPIC_API_KEY` を設定 |
+| 感情スコアが常に0 | `emotions` 未提供かつAPIキーなし | `store_memory` で `emotions` dictを明示的に渡すか、`ANTHROPIC_API_KEY` を設定して自動タギングを有効化 |
 | ツールが表示されない | Claude Codeが古い | `claude update` で最新版に更新 |
 | 記憶が想起されない | DBが空 | 最初の10ターン程度は記憶蓄積期間。使い続けると機能し始める |
 

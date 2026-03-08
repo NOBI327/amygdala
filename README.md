@@ -95,7 +95,7 @@ graph TD
     end
 
     LongTermDB[("LongTermDB\nSQLite")]
-    LLMAdapter["LLMAdapter\nAnthropic / OpenAI / Gemini / Claude Code CLI"]
+    LLMAdapter["LLMAdapter\nAnthropic / OpenAI / Gemini"]
     MCPServer["MCPServer\nstdio transport (Phase 3)"]
 
     Backman --> LLMAdapter
@@ -174,14 +174,21 @@ pip install mcp  # required for MCP server
 
 ### 2. Set Your API Key (Optional)
 
-If `ANTHROPIC_API_KEY` is not set, Amygdala automatically falls back to Claude Code CLI (`claude -p`), using your Max plan's included tokens at no extra cost.
+Amygdala supports two operating modes:
 
-To use the Anthropic API directly instead (lower latency):
+| Mode | Setup | Emotion Tagging |
+|---|---|---|
+| **Claude Code mode** | No API key needed | Claude Code provides emotion scores via `emotions` parameter (auto-tagging disabled) |
+| **API mode** | Set `ANTHROPIC_API_KEY` | Backman auto-tags emotions internally (lower latency) |
+
+To enable API mode:
 
 ```bash
 # Add to your shell config (.bashrc / .zshrc / etc.)
 export ANTHROPIC_API_KEY="sk-ant-..."
 ```
+
+> **Claude Code mode note**: When running without an API key, always pass `emotions` explicitly in `store_memory` and `recall_memories` calls. Claude Code itself can judge the appropriate emotion scores. Omitting `emotions` results in zero vectors and poor recall accuracy.
 
 > **Security Note**
 > - Manage your API key via environment variables. Direct inclusion in config files (`.claude.json`, etc.) is **not recommended**.
@@ -283,7 +290,7 @@ This only needs to be run once per project.
 
 | Variable | Default | Description |
 |---|---|---|
-| ANTHROPIC_API_KEY | (optional) | Anthropic API key. If unset, falls back to Claude Code CLI |
+| ANTHROPIC_API_KEY | (optional) | Anthropic API key. If unset, auto-tagging is disabled; pass `emotions` explicitly |
 | EMS_BACKMAN_MODEL | claude-haiku-4-5-20251001 | Backman model |
 | EMS_FRONTMAN_MODEL | claude-haiku-4-5-20251001 | Frontman model |
 | EMS_DB_PATH | memory.db | SQLite DB file path |
@@ -293,7 +300,7 @@ This only needs to be run once per project.
 | Symptom | Cause | Fix |
 |------|------|------|
 | `/mcp` does not show `connected` | Incorrect path | Check that `cwd` points to the amygdala root directory |
-| Emotion scores always 0 | LLM adapter not connected | Verify Claude Code CLI is installed (`claude --version`), or set `ANTHROPIC_API_KEY` |
+| Emotion scores always 0 | `emotions` not provided and no API key | Pass `emotions` dict explicitly in `store_memory` calls, or set `ANTHROPIC_API_KEY` for auto-tagging |
 | Tools not listed | Claude Code is outdated | Run `claude update` to upgrade |
 | Memories not recalled | DB is empty | First ~10 turns are the memory accumulation phase; it starts working after that |
 
