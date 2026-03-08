@@ -238,6 +238,43 @@ claude          # Launch Claude Code
 
 If you see `emotion-memory: connected`, you're good to go.
 
+### 5. Bulk Permission Setup (Recommended)
+
+By default, Claude Code asks for confirmation each time an Amygdala tool is called. To approve all 6 tools at once with a description of each, run:
+
+```bash
+python setup_permissions.py
+```
+
+```
+============================================================
+  Emotion Memory System — Feature List
+============================================================
+
+  1. Store Memory
+     Tag text with emotion scores (10 axes: joy, trust, etc.) and save to DB.
+
+  2. Recall Memories
+     Search and retrieve relevant memories by emotional similarity.
+
+  3. Stats
+     Return system statistics: total memories, emotion distribution, diversity index.
+
+  4. Pin Memory
+     Pin important information to working memory (max 3 slots).
+
+  5. Unpin Memory
+     Release a pin and migrate it to long-term memory.
+
+  6. List Pinned Memories
+     Show currently pinned memories with their TTL remaining.
+
+Approve all? [Y/n]: y
+→ Done. All tools registered in .claude/settings.local.json.
+```
+
+This only needs to be run once per project.
+
 ### Environment Variables
 
 | Variable | Default | Description |
