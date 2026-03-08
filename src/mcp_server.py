@@ -30,14 +30,18 @@ class EmotionMemoryMCPServer:
                 from .llm_adapter import AnthropicAdapter
                 llm_client = AnthropicAdapter(default_model=config.BACKMAN_MODEL)
             else:
-                # APIキーなし → Claude Code CLI経由（Maxプラン定額トークン使用）
-                from .llm_adapter import ClaudeCodeAdapter
-                llm_client = ClaudeCodeAdapter(timeout=120)
-                logger.info("ANTHROPIC_API_KEY not set. Using Claude Code CLI adapter.")
+                llm_client = None
+                logger.warning(
+                    "ANTHROPIC_API_KEY not set. "
+                    "Emotion auto-tagging disabled. "
+                    "Provide emotions explicitly in store_memory calls, "
+                    "or set ANTHROPIC_API_KEY to enable auto-tagging."
+                )
             self.memory_system = MemorySystem(llm_client, db, config)
         else:
             self.memory_system = memory_system
 
+        self.auto_tagging = self.memory_system.backman.adapter is not None
         self.mcp = FastMCP("EmotionMemoryServer")
         self._register_tools()
 
@@ -65,7 +69,9 @@ class EmotionMemoryMCPServer:
             """感情タギングしてメモリをDBに保存する。
 
             emotions引数は全10軸の感情スコアをdictで渡す(0.0-1.0)。
-            省略した場合、内部LLMで自動タギングする。
+            省略した場合、内部LLMで自動タギングする（ANTHROPIC_API_KEY必要）。
+            APIキー未設定時はemotionsを明示的に渡すことを強く推奨。
+            省略時はゼロベクターとなり検索精度が低下する。
 
             感情軸: joy, sadness, anger, fear, surprise, disgust, trust, anticipation, importance, urgency
 
@@ -80,10 +86,23 @@ class EmotionMemoryMCPServer:
             return result
 
         @self.mcp.tool()
-        def recall_memories(query: str, top_n: int = 5) -> List:
-            """感情ベース検索でメモリを取得する"""
+        def recall_memories(
+            query: str,
+            top_n: int = 5,
+            emotions: Optional[Dict[str, float]] = None,
+        ) -> List:
+            """感情ベース検索でメモリを取得する。
+
+            emotions引数で検索クエリの感情ベクトルを明示的に渡せる(0.0-1.0)。
+            省略時は内部LLMでクエリを感情タギングする（ANTHROPIC_API_KEY必要）。
+            APIキー未設定時はemotionsを明示的に渡すことを強く推奨。
+
+            感情軸: joy, sadness, anger, fear, surprise, disgust, trust, anticipation, importance, urgency
+
+            例: emotions={"joy":0.3,"sadness":0.0,"anger":0.0,"fear":0.0,"surprise":0.0,"disgust":0.0,"trust":0.5,"anticipation":0.2,"importance":0.7,"urgency":0.1}
+            """
             server._tick_pin_ttl()
-            return server.recall_memories(query, top_n)
+            return server.recall_memories(query, top_n, emotions_input=emotions)
 
         @self.mcp.tool()
         def get_stats() -> Dict:
@@ -157,13 +176,17 @@ class EmotionMemoryMCPServer:
                 logger.warning(f"Invalid emotions_input: {e}. Falling back to backman.")
                 emotion = None
 
+        used_zero_vector = False
         if emotion is None:
             try:
                 tag_result = ms.backman.tag_emotion(text)
                 emotion = tag_result.get("emotion", {})
+                if not self.auto_tagging:
+                    used_zero_vector = True
             except Exception as e:
                 logger.warning(f"Emotion tagging failed: {e}. Using zero vectors.")
                 emotion = {ax: 0.0 for ax in list(ms.config.EMOTION_AXES) + list(ms.config.META_AXES)}
+                used_zero_vector = True
 
         dominant_emotion, dominant_score = max(
             ((ax, float(emotion.get(ax, 0.0))) for ax in ms.config.EMOTION_AXES),
@@ -195,30 +218,66 @@ class EmotionMemoryMCPServer:
         )
         conn.commit()
 
-        return {
+        result = {
             "memory_id": cursor.lastrowid,
             "emotion": dominant_emotion,
             "score": dominant_score,
         }
+        if used_zero_vector:
+            result["warning"] = (
+                "Auto-tagging unavailable (no ANTHROPIC_API_KEY). "
+                "Memory saved with zero vector — recall accuracy will be poor. "
+                "Provide emotions dict explicitly to enable accurate emotion-based search."
+            )
+        return result
 
-    def recall_memories(self, query: str, top_n: int = 5) -> List[Dict]:
+    def recall_memories(
+        self,
+        query: str,
+        top_n: int = 5,
+        emotions_input: Optional[Any] = None,
+    ) -> List[Dict]:
         """
         クエリに基づいて感情ベース検索を実行する。
 
         Args:
             query: 検索クエリ
             top_n: 返却件数上限
+            emotions_input: 感情スコア（dict or JSON文字列、省略時は内部LLMでタギング）
 
         Returns:
             [{"id": int, "content": str, "emotion": str, "score": float}, ...]
         """
         ms = self.memory_system
-        try:
-            tag_result = ms.backman.tag_emotion(query)
-            emotion_vec = tag_result.get("emotion", {})
-        except Exception as e:
-            logger.warning(f"Emotion tagging failed: {e}. Using zero vectors.")
-            emotion_vec = {ax: 0.0 for ax in list(ms.config.EMOTION_AXES) + list(ms.config.META_AXES)}
+        emotion_vec = None
+
+        if emotions_input:
+            try:
+                if isinstance(emotions_input, str):
+                    emotion_vec = json.loads(emotions_input)
+                elif isinstance(emotions_input, dict):
+                    emotion_vec = emotions_input
+                else:
+                    raise TypeError(f"Unsupported type: {type(emotions_input)}")
+                all_axes = list(ms.config.EMOTION_AXES) + list(ms.config.META_AXES)
+                for ax in all_axes:
+                    val = emotion_vec.get(ax, 0.0)
+                    emotion_vec[ax] = max(0.0, min(1.0, float(val)))
+            except (json.JSONDecodeError, TypeError, ValueError) as e:
+                logger.warning(f"Invalid emotions_input: {e}. Falling back to backman.")
+                emotion_vec = None
+
+        used_zero_vector = False
+        if emotion_vec is None:
+            try:
+                tag_result = ms.backman.tag_emotion(query)
+                emotion_vec = tag_result.get("emotion", {})
+                if not self.auto_tagging:
+                    used_zero_vector = True
+            except Exception as e:
+                logger.warning(f"Emotion tagging failed: {e}. Using zero vectors.")
+                emotion_vec = {ax: 0.0 for ax in list(ms.config.EMOTION_AXES) + list(ms.config.META_AXES)}
+                used_zero_vector = True
 
         results = ms.search_engine.search_memories(emotion_vec, [])
         results = ms.diversity_watchdog.apply_exploration(results, emotion_vec)
@@ -231,6 +290,15 @@ class EmotionMemoryMCPServer:
                 "emotion": self._get_dominant_emotion(m, ms.config),
                 "score": float(m.get("score", m.get("relevance_score", 0.0))),
             })
+        if used_zero_vector:
+            return {
+                "results": output,
+                "warning": (
+                    "Auto-tagging unavailable (no ANTHROPIC_API_KEY). "
+                    "Searched with zero vector — results may be inaccurate. "
+                    "Provide emotions dict explicitly for accurate emotion-based search."
+                ),
+            }
         return output
 
     def get_stats(self) -> Dict:
@@ -270,6 +338,7 @@ class EmotionMemoryMCPServer:
             "emotion_distribution": emotion_distribution,
             "diversity_index": diversity_index,
             "pinned_count": pinned,
+            "auto_tagging": self.auto_tagging,
         }
 
     def pin_memory(self, content: str, label: str = "") -> Dict:

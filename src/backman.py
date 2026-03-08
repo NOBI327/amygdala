@@ -105,7 +105,10 @@ JSON出力（以下の形式のみ）:
         """
         if self.adapter is None:
             logger.warning("LLM adapter not set. Returning zero vector.")
-            return {k: 0.0 for k in ["joy", "sadness", "anger", "fear", "surprise", "disgust", "trust", "anticipation", "importance", "urgency"]}
+            return {
+                "emotion": {k: 0.0 for k in list(self.config.EMOTION_AXES) + list(self.config.META_AXES)},
+                "scenes": [],
+            }
         prompt = self._build_tagging_prompt(text)
         try:
             raw = self.adapter.generate(
