@@ -88,6 +88,7 @@ class EmotionMemoryMCPServer:
         @self.mcp.tool()
         def get_stats() -> Dict:
             """メモリシステムの統計情報を返す"""
+            server._tick_pin_ttl()
             return server.get_stats()
 
         @self.mcp.tool()
@@ -96,7 +97,11 @@ class EmotionMemoryMCPServer:
 
             スロット上限あり。満杯の場合はエラーを返す。
             """
-            return server.pin_memory(content, label)
+            result = server.pin_memory(content, label)
+            expired = server._tick_pin_ttl()
+            if expired:
+                result["pin_ttl_expired"] = server.memory_system.pin_memory.generate_ttl_prompt(expired)
+            return result
 
         @self.mcp.tool()
         def unpin_memory(pin_id: int) -> Dict:
@@ -104,11 +109,14 @@ class EmotionMemoryMCPServer:
 
             pin_idはlist_pinned_memoriesで確認できる。
             """
-            return server.unpin_memory(pin_id)
+            result = server.unpin_memory(pin_id)
+            server._tick_pin_ttl()
+            return result
 
         @self.mcp.tool()
         def list_pinned_memories() -> List:
             """ピン固定中のメモリ一覧を返す"""
+            server._tick_pin_ttl()
             return server.list_pinned_memories()
 
     def store_memory(
@@ -245,7 +253,7 @@ class EmotionMemoryMCPServer:
         ).fetchone()[0]
 
         pinned = conn.execute(
-            "SELECT COUNT(*) FROM memories WHERE pinned_flag = TRUE AND archived = FALSE"
+            "SELECT COUNT(*) FROM pin_memories WHERE active = TRUE"
         ).fetchone()[0]
 
         emotion_distribution = {}
