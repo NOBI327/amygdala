@@ -7,6 +7,7 @@ from mcp.server.fastmcp import FastMCP
 from .config import Config
 from .db import DatabaseManager
 from .memory_system import MemorySystem
+from .relational_graph import RelationalGraphEngine
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,11 @@ class EmotionMemoryMCPServer:
             self.memory_system = memory_system
 
         self.auto_tagging = self.memory_system.backman.adapter is not None
+        self.graph_engine = RelationalGraphEngine(
+            config=self.memory_system.config,
+            db_manager=self.memory_system.db,
+            llm_adapter=self.memory_system.backman.adapter,
+        )
         self.mcp = FastMCP("EmotionMemoryServer")
         self._register_tools()
 
@@ -138,6 +144,52 @@ class EmotionMemoryMCPServer:
             server._tick_pin_ttl()
             return server.list_pinned_memories()
 
+        @self.mcp.tool()
+        def query_entity_graph(
+            entity: str,
+            hops: int = 1,
+        ) -> Dict:
+            """エンティティの関係性グラフを検索する。
+
+            指定エンティティに接続するノード・エッジ・タグを返す。
+            hops=2で2ホップ先の関連エンティティも含める。
+
+            Args:
+                entity: エンティティ名（部分一致で検索）
+                hops: 探索ホップ数（1 or 2、デフォルト1）
+            """
+            server._tick_pin_ttl()
+            return server.query_entity_graph(entity, hops)
+
+        @self.mcp.tool()
+        def list_graph_entities(
+            type_filter: str = "",
+            top_n: int = 20,
+        ) -> List:
+            """グラフ上のアクティブなエンティティ一覧を返す。
+
+            mention_count × importance 降順でソート。
+
+            Args:
+                type_filter: エンティティタイプでフィルタ（person/topic/item/place/event、空文字で全件）
+                top_n: 返却上限数（デフォルト20）
+            """
+            server._tick_pin_ttl()
+            return server.list_graph_entities(type_filter, top_n)
+
+        @self.mcp.tool()
+        def forget_entity(entity: str) -> Dict:
+            """指定エンティティとその関連エッジをsoft-archiveする。
+
+            エンティティ名で検索し、該当ノードとそれに接続する全エッジを
+            archived=Trueにする。元に戻すことはできない。
+
+            Args:
+                entity: エンティティ名
+            """
+            server._tick_pin_ttl()
+            return server.forget_entity(entity)
+
     def store_memory(
         self,
         text: str,
@@ -217,6 +269,12 @@ class EmotionMemoryMCPServer:
             ),
         )
         conn.commit()
+
+        # グラフ更新（非致命的）
+        try:
+            self.graph_engine.process_turn(text, emotion)
+        except Exception as e:
+            logger.warning(f"Graph update on store_memory failed: {e}")
 
         result = {
             "memory_id": cursor.lastrowid,
@@ -381,6 +439,75 @@ class EmotionMemoryMCPServer:
             }
             for p in pins
         ]
+
+    def query_entity_graph(self, entity: str, hops: int = 1) -> Dict:
+        """エンティティの関係性コンテキストを返す"""
+        hops = max(1, min(hops, 2))
+        result = self.graph_engine.get_entity_context(entity, hops)
+        if result is None:
+            return {"error": f"Entity not found: {entity!r}"}
+        return dict(result)
+
+    def list_graph_entities(self, type_filter: str = "", top_n: int = 20) -> List[Dict]:
+        """アクティブなエンティティ一覧を返す"""
+        conn = self.memory_system.db.get_connection()
+        if type_filter:
+            rows = conn.execute(
+                """SELECT * FROM graph_nodes
+                   WHERE archived = FALSE AND type = ?
+                   ORDER BY (mention_count * importance) DESC
+                   LIMIT ?""",
+                (type_filter, top_n)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT * FROM graph_nodes
+                   WHERE archived = FALSE
+                   ORDER BY (mention_count * importance) DESC
+                   LIMIT ?""",
+                (top_n,)
+            ).fetchall()
+
+        result = []
+        for row in rows:
+            aliases = json.loads(row["aliases"]) if row["aliases"] else []
+            result.append({
+                "id": row["id"],
+                "label": row["label"],
+                "type": row["type"],
+                "aliases": aliases,
+                "mention_count": row["mention_count"],
+            })
+        return result
+
+    def forget_entity(self, entity: str) -> Dict:
+        """エンティティとその関連エッジをsoft-archiveする"""
+        node = self.graph_engine.find_node(entity)
+        if not node:
+            return {"error": f"Entity not found: {entity!r}"}
+
+        conn = self.memory_system.db.get_connection()
+        node_id = node["id"]
+
+        # 関連エッジを archive
+        cursor = conn.execute(
+            """UPDATE graph_edges SET archived = TRUE
+               WHERE (source_id = ? OR target_id = ?) AND archived = FALSE""",
+            (node_id, node_id)
+        )
+        archived_edges = cursor.rowcount
+
+        # ノードを archive
+        conn.execute(
+            "UPDATE graph_nodes SET archived = TRUE WHERE id = ?",
+            (node_id,)
+        )
+        conn.commit()
+
+        return {
+            "forgotten_entity": node["label"],
+            "archived_edges": archived_edges,
+        }
 
     def _get_dominant_emotion(self, memory: Dict, config: Config) -> str:
         """メモリDictから支配的な感情軸名を返す。

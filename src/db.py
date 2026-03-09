@@ -83,6 +83,56 @@ class DatabaseManager:
                 dominant_emotion TEXT,
                 context_scene TEXT
             );
+
+            -- 関係性グラフ: ノード（エンティティ）
+            CREATE TABLE IF NOT EXISTS graph_nodes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                label TEXT NOT NULL,
+                type TEXT NOT NULL CHECK(type IN ('person','topic','item','place','event')),
+                aliases TEXT DEFAULT '[]',
+                first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+                mention_count INTEGER DEFAULT 1,
+                joy REAL DEFAULT 0, sadness REAL DEFAULT 0,
+                anger REAL DEFAULT 0, fear REAL DEFAULT 0,
+                surprise REAL DEFAULT 0, disgust REAL DEFAULT 0,
+                trust REAL DEFAULT 0, anticipation REAL DEFAULT 0,
+                importance REAL DEFAULT 0, urgency REAL DEFAULT 0,
+                archived BOOLEAN DEFAULT FALSE
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_node_label ON graph_nodes(label);
+
+            -- 関係性グラフ: エッジ（ノード間の関係性）
+            CREATE TABLE IF NOT EXISTS graph_edges (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_id INTEGER NOT NULL REFERENCES graph_nodes(id),
+                target_id INTEGER NOT NULL REFERENCES graph_nodes(id),
+                strength REAL DEFAULT 1.0,
+                confidence REAL DEFAULT 0.5,
+                last_activated DATETIME DEFAULT CURRENT_TIMESTAMP,
+                activation_count INTEGER DEFAULT 1,
+                joy REAL DEFAULT 0, sadness REAL DEFAULT 0,
+                anger REAL DEFAULT 0, fear REAL DEFAULT 0,
+                surprise REAL DEFAULT 0, disgust REAL DEFAULT 0,
+                trust REAL DEFAULT 0, anticipation REAL DEFAULT 0,
+                importance REAL DEFAULT 0, urgency REAL DEFAULT 0,
+                archived BOOLEAN DEFAULT FALSE,
+                UNIQUE(source_id, target_id)
+            );
+
+            -- 関係性グラフ: タグ（エッジ上の関係性ラベル）
+            CREATE TABLE IF NOT EXISTS graph_tags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                edge_id INTEGER NOT NULL REFERENCES graph_edges(id),
+                label TEXT NOT NULL,
+                strength REAL DEFAULT 0.5,
+                activation_count INTEGER DEFAULT 1,
+                decay_rate REAL DEFAULT 0.05,
+                confirmed BOOLEAN DEFAULT FALSE,
+                created DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_activated DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(edge_id, label)
+            );
         """)
         conn.commit()
         logger.info(f"Database initialized: {self.db_path}")

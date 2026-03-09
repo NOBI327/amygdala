@@ -1,5 +1,5 @@
 import logging
-from typing import Any, List, Dict
+from typing import Any, Dict, List, Optional
 from .config import Config
 
 logger = logging.getLogger(__name__)
@@ -28,14 +28,16 @@ class FrontmanService:
         working_memory: List[Dict],
         pin_memories: List[Dict],
         search_results: List[Dict],
+        graph_contexts: Optional[List[Dict]] = None,
     ) -> str:
         """
         バックマンが組み立てたコンテキストからシステムプロンプトを生成する。
 
         プロンプト構造（コンテキスト汚染防止原則）:
         1. [📌 ピンメモリ] 最大3件（常時含める）
-        2. [🔍 関連記憶] 検索結果上位N件（感情ベース）
-        3. [💬 最近の会話] ワーキングメモリ（直近Nターン）
+        2. [🔗 関連エンティティ] 最大3件（関係性グラフ）
+        3. [🔍 関連記憶] 検索結果上位N件（感情ベース）
+        4. [💬 最近の会話] ワーキングメモリ（直近Nターン）
         """
         sections = []
 
@@ -44,6 +46,26 @@ class FrontmanService:
             for pin in pin_memories:
                 pin_section += f"- {pin['content']}\n"
             sections.append(pin_section)
+
+        if graph_contexts:
+            graph_section = "🔗 **関連エンティティ（関係性グラフ）**:\n"
+            for ctx in graph_contexts[:3]:
+                entity = ctx["entity"]
+                related = ", ".join(ctx["related_entities"][:5])
+                tags = ", ".join(ctx["active_tags"][:5])
+                emo = ctx.get("primary_emotion", {})
+                emo_str = ", ".join(
+                    f"{k}:{v:.1f}" for k, v in
+                    sorted(emo.items(), key=lambda x: x[1], reverse=True)[:2]
+                ) if emo else "N/A"
+                line = f"- **{entity}**"
+                if related:
+                    line += f" → 関連: {related}"
+                if tags:
+                    line += f" [タグ: {tags}]"
+                line += f" (感情: {emo_str})"
+                graph_section += line + "\n"
+            sections.append(graph_section)
 
         if search_results:
             search_section = "🔍 **関連する過去の記憶（感情ベース検索）**:\n"

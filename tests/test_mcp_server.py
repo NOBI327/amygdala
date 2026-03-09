@@ -2,12 +2,14 @@
 test_mcp_server.py — EmotionMemoryMCPServer オフラインテスト
 
 MemorySystemをMagicMockで注入してLLM/DB呼び出しなしでテストする。
+グラフ系ツールは実DB(:memory:)を使うfixture(server_with_db)でテスト。
 """
 import pytest
 from unittest.mock import MagicMock, patch
 
 from src.mcp_server import EmotionMemoryMCPServer
 from src.config import Config
+from src.db import DatabaseManager
 
 
 EMOTION_AXES = ("joy", "sadness", "anger", "fear", "surprise", "disgust", "trust", "anticipation")
@@ -374,3 +376,222 @@ class TestGetStats:
         assert isinstance(result["emotion_distribution"], dict)
         assert isinstance(result["diversity_index"], float)
         assert isinstance(result["pinned_count"], int)
+
+
+# ─── Graph tools fixtures (real DB) ─────────────────────────────────────────
+
+def _graph_emotion(**overrides):
+    vec = {ax: 0.0 for ax in EMOTION_AXES + META_AXES}
+    vec.update(overrides)
+    return vec
+
+
+@pytest.fixture
+def server_with_db():
+    """実DB(:memory:)を使うサーバー。グラフツールテスト用。"""
+    ms = MagicMock()
+    config = Config(DB_PATH=":memory:")
+    db = DatabaseManager(":memory:")
+    db.init()
+    ms.config = config
+    ms.db = db
+    ms.backman.adapter = None  # LLM なし
+    ms.pin_memory.decrement_ttl.return_value = []
+    srv = EmotionMemoryMCPServer(memory_system=ms)
+    yield srv
+    db.close()
+
+
+# ─── query_entity_graph ─────────────────────────────────────────────────────
+
+class TestQueryEntityGraph:
+    def test_returns_error_for_unknown_entity(self, server_with_db):
+        result = server_with_db.query_entity_graph("不存在", 1)
+        assert "error" in result
+
+    def test_returns_context_for_known_entity(self, server_with_db):
+        srv = server_with_db
+        emo = _graph_emotion(joy=0.8, trust=0.6, importance=0.5)
+        srv.graph_engine.upsert_node("田中", "person", emo)
+        srv.graph_engine.upsert_node("プロジェクトA", "topic", emo)
+        srv.graph_engine.upsert_edge("田中", "プロジェクトA", emo, ["担当者"])
+
+        result = srv.query_entity_graph("田中", 1)
+
+        assert result["entity"] == "田中"
+        assert "プロジェクトA" in result["related_entities"]
+
+    def test_hops_clamped_to_max_2(self, server_with_db):
+        srv = server_with_db
+        emo = _graph_emotion(joy=0.5, importance=0.3)
+        srv.graph_engine.upsert_node("A", "person", emo)
+
+        # hops=99 でもエラーにならない（内部で clamp される）
+        result = srv.query_entity_graph("A", 99)
+        assert result["entity"] == "A"
+
+    def test_2hop_returns_distant_entities(self, server_with_db):
+        srv = server_with_db
+        emo = _graph_emotion(trust=0.7, importance=0.5)
+        srv.graph_engine.upsert_node("X", "person", emo)
+        srv.graph_engine.upsert_node("Y", "topic", emo)
+        srv.graph_engine.upsert_node("Z", "place", emo)
+        srv.graph_engine.upsert_edge("X", "Y", emo, ["関連"])
+        srv.graph_engine.upsert_edge("Y", "Z", emo, ["場所"])
+
+        result = srv.query_entity_graph("X", 2)
+
+        assert "Z" in result["related_entities"]
+
+
+# ─── list_graph_entities ─────────────────────────────────────────────────────
+
+class TestListGraphEntities:
+    def test_empty_graph_returns_empty_list(self, server_with_db):
+        result = server_with_db.list_graph_entities()
+        assert result == []
+
+    def test_returns_all_entities(self, server_with_db):
+        srv = server_with_db
+        emo = _graph_emotion(joy=0.5, importance=0.5)
+        srv.graph_engine.upsert_node("Alice", "person", emo)
+        srv.graph_engine.upsert_node("Python", "topic", emo)
+
+        result = srv.list_graph_entities()
+
+        labels = [r["label"] for r in result]
+        assert "Alice" in labels
+        assert "Python" in labels
+
+    def test_type_filter_person(self, server_with_db):
+        srv = server_with_db
+        emo = _graph_emotion(importance=0.5)
+        srv.graph_engine.upsert_node("Bob", "person", emo)
+        srv.graph_engine.upsert_node("東京", "place", emo)
+
+        result = srv.list_graph_entities(type_filter="person")
+
+        labels = [r["label"] for r in result]
+        assert "Bob" in labels
+        assert "東京" not in labels
+
+    def test_top_n_limits_results(self, server_with_db):
+        srv = server_with_db
+        emo = _graph_emotion(importance=0.5)
+        for i in range(10):
+            srv.graph_engine.upsert_node(f"Entity{i}", "topic", emo)
+
+        result = srv.list_graph_entities(top_n=3)
+
+        assert len(result) == 3
+
+    def test_result_contains_expected_keys(self, server_with_db):
+        srv = server_with_db
+        emo = _graph_emotion(joy=0.3, importance=0.7)
+        srv.graph_engine.upsert_node("テスト", "item", emo, aliases=["test"])
+
+        result = srv.list_graph_entities()
+
+        assert len(result) == 1
+        item = result[0]
+        assert "id" in item
+        assert item["label"] == "テスト"
+        assert item["type"] == "item"
+        assert "test" in item["aliases"]
+        assert item["mention_count"] == 1
+
+    def test_ordered_by_importance_x_mention(self, server_with_db):
+        srv = server_with_db
+        # 高importance
+        srv.graph_engine.upsert_node("High", "topic", _graph_emotion(importance=0.9))
+        # 低importance
+        srv.graph_engine.upsert_node("Low", "topic", _graph_emotion(importance=0.1))
+
+        result = srv.list_graph_entities()
+
+        assert result[0]["label"] == "High"
+        assert result[1]["label"] == "Low"
+
+
+# ─── forget_entity ───────────────────────────────────────────────────────────
+
+class TestForgetEntity:
+    def test_returns_error_for_unknown_entity(self, server_with_db):
+        result = server_with_db.forget_entity("ghost")
+        assert "error" in result
+
+    def test_archives_node_and_edges(self, server_with_db):
+        srv = server_with_db
+        emo = _graph_emotion(trust=0.5, importance=0.5)
+        srv.graph_engine.upsert_node("佐藤", "person", emo)
+        srv.graph_engine.upsert_node("仕事", "topic", emo)
+        srv.graph_engine.upsert_edge("佐藤", "仕事", emo, ["担当"])
+
+        result = srv.forget_entity("佐藤")
+
+        assert result["forgotten_entity"] == "佐藤"
+        assert result["archived_edges"] == 1
+
+        # ノードが検索できなくなっていること
+        assert srv.graph_engine.find_node("佐藤") is None
+
+    def test_forget_does_not_affect_other_entities(self, server_with_db):
+        srv = server_with_db
+        emo = _graph_emotion(importance=0.5)
+        srv.graph_engine.upsert_node("削除対象", "topic", emo)
+        srv.graph_engine.upsert_node("残す対象", "topic", emo)
+
+        srv.forget_entity("削除対象")
+
+        assert srv.graph_engine.find_node("残す対象") is not None
+        assert srv.graph_engine.find_node("削除対象") is None
+
+    def test_forget_with_alias(self, server_with_db):
+        """aliasで登録されたエンティティもforgetできる"""
+        srv = server_with_db
+        emo = _graph_emotion(importance=0.5)
+        srv.graph_engine.upsert_node("山田", "person", emo, aliases=["山田部長"])
+
+        result = srv.forget_entity("山田部長")
+
+        assert result["forgotten_entity"] == "山田"
+        assert srv.graph_engine.find_node("山田") is None
+
+
+# ─── store_memory → graph update ─────────────────────────────────────────────
+
+class TestStoreMemoryGraphUpdate:
+    """Step 6c: store_memory がグラフ更新を呼び出すテスト"""
+
+    def test_store_memory_triggers_graph_update(self, server, mock_memory_system):
+        """store_memory 呼び出し後に graph_engine.process_turn が呼ばれる"""
+        mock_memory_system.backman.tag_emotion.return_value = {
+            "emotion": _emotion_vec(joy=0.7)
+        }
+        mock_cursor = MagicMock()
+        mock_cursor.lastrowid = 1
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value = mock_cursor
+        mock_memory_system.db.get_connection.return_value = mock_conn
+
+        with patch.object(server.graph_engine, "process_turn") as mock_gpt:
+            server.store_memory("田中さんとプロジェクトAについて話した")
+            assert mock_gpt.called
+            call_args = mock_gpt.call_args[0]
+            assert call_args[0] == "田中さんとプロジェクトAについて話した"
+
+    def test_store_memory_graph_failure_still_saves(self, server, mock_memory_system):
+        """graph_engine.process_turn が失敗しても store_memory は正常完了する"""
+        mock_memory_system.backman.tag_emotion.return_value = {
+            "emotion": _emotion_vec(trust=0.5)
+        }
+        mock_cursor = MagicMock()
+        mock_cursor.lastrowid = 42
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value = mock_cursor
+        mock_memory_system.db.get_connection.return_value = mock_conn
+
+        with patch.object(server.graph_engine, "process_turn", side_effect=Exception("graph error")):
+            result = server.store_memory("テスト")
+            assert result["memory_id"] == 42
+            assert "emotion" in result

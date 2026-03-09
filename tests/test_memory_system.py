@@ -203,3 +203,45 @@ class TestProcessTurn:
         assert len(system.turn_history) == 10
         assert system.turn_history[0]["user_input"] == "入力2"
         assert system.turn_history[-1]["user_input"] == "入力11"
+
+
+class TestGraphEngineIntegration:
+    """Step 6b: MemorySystem と RelationalGraphEngine の統合テスト"""
+
+    def test_graph_engine_initialized(self, system):
+        """MemorySystem.__init__ 後に graph_engine が存在する"""
+        assert hasattr(system, "graph_engine")
+        from src.relational_graph import RelationalGraphEngine
+        assert isinstance(system.graph_engine, RelationalGraphEngine)
+
+    def test_process_turn_calls_graph_process_turn(self, system):
+        """process_turn 内で graph_engine.process_turn が呼ばれる"""
+        with patch.object(system.graph_engine, "process_turn", return_value={"updated": False}) as mock_gpt:
+            system.process_turn("テスト入力")
+            assert mock_gpt.called
+
+    def test_graph_failure_does_not_break_process_turn(self, system):
+        """graph_engine.process_turn が例外を投げても応答が正常に返る"""
+        with patch.object(system.graph_engine, "process_turn", side_effect=Exception("graph error")):
+            response = system.process_turn("テスト入力")
+            assert isinstance(response, str)
+
+    def test_graph_contexts_passed_to_build_context_prompt(self, system):
+        """graph_result.updated=True の場合、build_context_prompt に graph_contexts が渡される"""
+        with patch.object(system.graph_engine, "process_turn", return_value={"updated": True}):
+            mock_ctx = {"entity": "テスト", "related_entities": [], "active_tags": [], "primary_emotion": {}}
+            with patch.object(system, "_get_relevant_graph_contexts", return_value=[mock_ctx]) as mock_grgc:
+                with patch.object(system.frontman, "build_context_prompt", wraps=system.frontman.build_context_prompt) as mock_bcp:
+                    system.process_turn("テスト入力")
+                    assert mock_grgc.called
+                    call_kwargs = mock_bcp.call_args
+                    gc_arg = call_kwargs.kwargs.get("graph_contexts", None)
+                    assert gc_arg is not None
+                    assert len(gc_arg) == 1
+
+    def test_process_turn_without_graph_update_skips_contexts(self, system):
+        """graph_result.updated=False の場合、_get_relevant_graph_contexts は呼ばれない"""
+        with patch.object(system.graph_engine, "process_turn", return_value={"updated": False}):
+            with patch.object(system, "_get_relevant_graph_contexts") as mock_grgc:
+                system.process_turn("テスト入力")
+                assert not mock_grgc.called

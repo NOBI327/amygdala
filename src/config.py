@@ -56,6 +56,14 @@ class Config:
     COLD_START_BOOST: float = 1.5
     COLD_START_THRESHOLD: int = 50
 
+    # 関係性グラフ
+    GRAPH_MAX_ACTIVE_NODES: int = 100
+    GRAPH_MAX_EDGES_PER_NODE: int = 20
+    GRAPH_MAX_TAGS_PER_EDGE: int = 10
+    TAG_CANDIDATE_THRESHOLD: int = 3        # 昇格に必要な activation_count
+    TAG_STRENGTH_THRESHOLD: float = 0.1     # これ以下で削除
+    GRAPH_HOP_LIMIT: int = 2
+
     @classmethod
     def from_env(cls) -> "Config":
         """環境変数でモデル切替可能（A1要件）"""

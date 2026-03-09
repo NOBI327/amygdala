@@ -10,6 +10,7 @@ from .pin_memory import PinMemory
 from .search_engine import SearchEngine
 from .reconsolidation import ConsolidationEngine
 from .diversity_watchdog import DiversityWatchdog
+from .relational_graph import RelationalGraphEngine
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,11 @@ class MemorySystem:
         self.search_engine = SearchEngine(self.config, db_manager)
         self.consolidation = ConsolidationEngine(self.config, db_manager)
         self.diversity_watchdog = DiversityWatchdog(self.config, db_manager)
+        self.graph_engine = RelationalGraphEngine(
+            config=self.config,
+            db_manager=db_manager,
+            llm_adapter=llm_client,
+        )
         self.turn_history: List[Dict] = []
 
     def process_turn(self, user_input: str) -> str:
@@ -77,17 +83,29 @@ class MemorySystem:
             emotion_vec = {ax: 0.0 for ax in list(self.config.EMOTION_AXES) + list(self.config.META_AXES)}
             current_scenes = []
 
+        # 2.5. グラフ更新（非致命的）
+        graph_result = {"updated": False}
+        try:
+            graph_result = self.graph_engine.process_turn(user_input, emotion_vec)
+        except Exception as e:
+            logger.warning(f"Graph processing failed: {e}")
+
         # 3. 長期記憶検索
         search_results = self.search_engine.search_memories(emotion_vec, current_scenes)
 
         # 3.5. DiversityWatchdogによる多様性注入
         search_results = self.diversity_watchdog.apply_exploration(search_results, emotion_vec)
 
+        # 3.7. 関連エンティティのコンテキスト取得
+        graph_contexts = []
+        if graph_result.get("updated"):
+            graph_contexts = self._get_relevant_graph_contexts(user_input, emotion_vec)
+
         # 4. コンテキストプロンプト組み立て
         working_mem = self.working_memory.get_turns()
         active_pins = self.pin_memory.get_active_pins()
         context_prompt = self.frontman.build_context_prompt(
-            working_mem, active_pins, search_results
+            working_mem, active_pins, search_results, graph_contexts=graph_contexts
         )
 
         # 5. 応答生成
@@ -169,6 +187,23 @@ class MemorySystem:
             self.turn_history = self.turn_history[-10:]
 
         return response_text
+
+    def _get_relevant_graph_contexts(self, text: str, emotion_vec: dict) -> list:
+        """テキストに関連するグラフコンテキストを最大3件取得する。
+
+        感情ベクトルで類似ノードを検索し、各ノードの EntityContext を返す。
+        """
+        try:
+            nodes = self.graph_engine.search_by_emotion(emotion_vec, top_k=3)
+            contexts = []
+            for node in nodes:
+                ctx = self.graph_engine.get_entity_context(node["label"])
+                if ctx:
+                    contexts.append(ctx)
+            return contexts
+        except Exception as e:
+            logger.warning(f"Failed to get graph contexts: {e}")
+            return []
 
     def close(self) -> None:
         """DB接続を閉じる"""
