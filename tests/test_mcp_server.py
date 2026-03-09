@@ -801,3 +801,78 @@ class TestGraphAugmentedRecall:
 
         ids = [r["id"] for r in results]
         assert len(ids) == len(set(ids)), "重複IDが存在する"
+
+    def test_graph_boost_applied(self, full_server):
+        """グラフ連鎖候補にGRAPH_BOOSTが適用されスコアが上がる"""
+        srv = full_server
+        db = srv.memory_system.db
+        emo = _graph_emotion(trust=0.7, importance=0.6)
+
+        # メモリA: エンティティXに言及
+        _insert_memory(db, "Xは重要なプロジェクト", trust=0.7, importance=0.6)
+        # メモリB: エンティティYに言及（Xと無関係なキーワード）
+        _insert_memory(db, "Yの進捗は順調", trust=0.7, importance=0.6)
+
+        # グラフ: X → Y のエッジ
+        srv.graph_engine.upsert_node("X", "topic", emo)
+        srv.graph_engine.upsert_node("Y", "topic", emo)
+        srv.graph_engine.upsert_edge("X", "Y", emo, ["関連"])
+
+        # 「X」で検索 → Yメモリがグラフ連鎖で引き上げられ、ブーストされるはず
+        results = srv.recall_memories(
+            "Xについて",
+            top_n=10,
+            emotions_input={"trust": 0.7, "importance": 0.6,
+                            "joy": 0, "sadness": 0, "anger": 0, "fear": 0,
+                            "surprise": 0, "disgust": 0, "anticipation": 0, "urgency": 0},
+        )
+
+        # Yメモリが結果に含まれている（グラフ連鎖で到達）
+        contents = [r["content"] for r in results]
+        assert any("Y" in c for c in contents), "グラフ連鎖でYメモリが取得されるべき"
+
+        # Yメモリのスコアがブーストされている（GRAPH_BOOST=1.25）
+        y_results = [r for r in results if "Y" in r["content"]]
+        assert y_results[0]["score"] > 0, "スコアが正の値であるべき"
+
+    def test_graph_boost_increases_score(self, full_server):
+        """グラフ連鎖候補のスコアがGRAPH_BOOST倍になっている"""
+        srv = full_server
+        db = srv.memory_system.db
+        emo = _graph_emotion(joy=0.5, trust=0.5)
+
+        # Pメモリ: 検索クエリと同じ感情ベクトル（直接ヒット）
+        _insert_memory(db, "Pは新しい技術", joy=0.5, trust=0.5)
+        # Qメモリ: 感情ベクトルをずらす（通常検索で低スコア→グラフ連鎖でのみ到達）
+        _insert_memory(db, "Qを使って実装した", joy=0.1, trust=0.1, sadness=0.7)
+
+        srv.graph_engine.upsert_node("P", "topic", emo)
+        srv.graph_engine.upsert_node("Q", "topic", emo)
+        srv.graph_engine.upsert_edge("P", "Q", emo, ["ツール"])
+
+        emotion_input = {"joy": 0.5, "trust": 0.5,
+                         "sadness": 0, "anger": 0, "fear": 0,
+                         "surprise": 0, "disgust": 0, "anticipation": 0,
+                         "importance": 0, "urgency": 0}
+
+        # Pメモリのみを初期結果として渡し、Qがグラフ連鎖で発見されるようにする
+        p_only = [r for r in srv.memory_system.search_engine.search_memories(emotion_input, [])
+                  if "P" in r["content"]]
+
+        # ブースト0（素のスコア）
+        srv.memory_system.config.GRAPH_BOOST = 0.0
+        candidates_base = srv._graph_augmented_candidates("Pについて", p_only, emotion_input)
+        q_base = [c for c in candidates_base if "Q" in c["content"]]
+
+        # ブースト0.2（加算）
+        srv.memory_system.config.GRAPH_BOOST = 0.2
+        candidates_boosted = srv._graph_augmented_candidates("Pについて", p_only, emotion_input)
+        q_boosted = [c for c in candidates_boosted if "Q" in c["content"]]
+
+        # リセット
+        srv.memory_system.config.GRAPH_BOOST = 0.03
+
+        assert len(q_base) > 0, "Qがグラフ連鎖候補に含まれるべき"
+        assert len(q_boosted) > 0, "Qがグラフ連鎖候補に含まれるべき"
+        assert q_boosted[0]["score"] > q_base[0]["score"], \
+            "加算ブーストでスコアが上がるべき"

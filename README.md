@@ -4,8 +4,8 @@
 
 [![日本語](https://img.shields.io/badge/lang-ja-blue)](README_ja.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-221%20passed-brightgreen)]()
-[![Coverage](https://img.shields.io/badge/coverage-73%25-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-219%20passed-brightgreen)]()
+[![Coverage](https://img.shields.io/badge/coverage-85%25-brightgreen)]()
 
 ---
 
@@ -72,6 +72,9 @@ Say "remember this" to anchor important information. Every 10 turns the system c
 
 ### Emotion-Tagged Relational Graph
 Entities (people, topics, projects, etc.) mentioned in conversations are extracted and linked into a relational graph. Each node and edge carries an emotion vector, enabling queries like "what topics are connected to this person?" The graph decays over time — frequently mentioned entities stay prominent while forgotten ones fade.
+
+### Graph-Augmented Recall
+When recalling memories, the system traverses the relational graph to find indirectly related memories. For example, searching for "Taro" also surfaces memories about "FastAPI" if Taro → Python → FastAPI connections exist in the graph. Graph-linked candidates receive an additive score boost to rank higher in results.
 
 ### Echo Chamber Prevention
 DiversityWatchdog monitors for repetitive recall of the same memories. When imbalance is detected, memories from other categories are automatically injected.
@@ -312,6 +315,7 @@ This only needs to be run once per project.
 | EMS_BACKMAN_MODEL | claude-haiku-4-5-20251001 | Backman model |
 | EMS_FRONTMAN_MODEL | claude-haiku-4-5-20251001 | Frontman model |
 | EMS_DB_PATH | memory.db | SQLite DB file path |
+| EMS_VERBOSE | true | Show emotion tags and scores in tool responses (set `false` to hide) |
 
 ### Troubleshooting
 
@@ -389,7 +393,7 @@ See [proposal v0.4](docs/emotion-memory-system-proposal-v0.4.md) for details.
 | Phase 2 | Feedback loop + diversity control — DiversityWatchdog / ConsolidationEngine / implicit feedback | 108 PASS | Done |
 | Phase 3 | MCP server + multi-provider LLM — LLMAdapter / MCPServer | 138 PASS | Done |
 | Phase 4 | API-keyless delegation + security hardening + README overhaul + eval infrastructure | 147 PASS | Done |
-| Phase 5 | Emotion-tagged relational graph — RelationalGraph / entity extraction / 3 graph MCP tools / external entity passthrough | 221 PASS | Done |
+| Phase 5 | Emotion-tagged relational graph — RelationalGraph / entity extraction / 3 graph MCP tools / external entity passthrough / graph-augmented recall | 219 PASS | Done |
 
 ### Directory Structure
 
@@ -416,7 +420,7 @@ amygdala/
 │   ├── run_labeling.sh        # Labeling workflow runner (Phase 4)
 │   ├── export_recall_log.py   # recall_log CSV exporter (Phase 4)
 │   └── accuracy_report.py     # Accuracy report generator (Phase 4)
-├── tests/                    # 221 tests
+├── tests/                    # 219 tests
 ├── docs/
 │   ├── emotion-memory-system-proposal-v0.4.md
 │   └── relational-graph-design.md

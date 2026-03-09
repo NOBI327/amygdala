@@ -66,6 +66,7 @@ class Config:
     TAG_CANDIDATE_THRESHOLD: int = 3        # 昇格に必要な activation_count
     TAG_STRENGTH_THRESHOLD: float = 0.1     # これ以下で削除
     GRAPH_HOP_LIMIT: int = 2
+    GRAPH_BOOST: float = 0.03  # グラフ連鎖recallで見つけた候補への加算ブースト
 
     @classmethod
     def from_env(cls) -> "Config":

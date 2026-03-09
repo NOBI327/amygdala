@@ -463,8 +463,12 @@ class EmotionMemoryMCPServer:
         if not rows:
             return []
 
-        # Step 4: 同じスコアリングロジックで評価
-        return ms.search_engine.score_memory_rows(rows, emotion_vec, [])
+        # Step 4: 同じスコアリングロジックで評価 + 加算ブースト
+        candidates = ms.search_engine.score_memory_rows(rows, emotion_vec, [])
+        boost = ms.config.GRAPH_BOOST
+        for c in candidates:
+            c["score"] = c.get("score", 0) + boost
+        return candidates
 
     def get_stats(self) -> Dict:
         """

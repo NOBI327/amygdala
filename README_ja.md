@@ -4,8 +4,8 @@
 
 [![English](https://img.shields.io/badge/lang-en-blue)](README.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-221%20passed-brightgreen)]()
-[![Coverage](https://img.shields.io/badge/coverage-73%25-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-219%20passed-brightgreen)]()
+[![Coverage](https://img.shields.io/badge/coverage-85%25-brightgreen)]()
 
 ---
 
@@ -72,6 +72,9 @@
 
 ### 感情タグ付き関係性グラフ
 会話に登場するエンティティ（人物・話題・プロジェクト等）を抽出し、関係性グラフとして構築。各ノード・エッジは感情ベクトルを持ち、「この人物に関連するトピックは？」といった検索が可能。グラフは時間とともに減衰し、頻繁に言及されるエンティティは残り、忘れられたものはフェードアウトする。
+
+### グラフ連鎖リコール
+記憶検索時、関係性グラフを辿って間接的に関連する記憶も発見する。例えば「Taro」で検索すると、グラフ上に Taro → Python → FastAPI の接続があれば、FastAPI に関する記憶も浮上する。グラフ経由で見つかった候補には加算ブーストが適用され、検索結果の上位に入りやすくなる。
 
 ### エコーチェンバー防止
 同じ記憶ばかり繰り返し想起されるのを防ぐ多様性モニタリング。偏りが検知されると、別カテゴリの記憶を自動で混入させる。
@@ -312,6 +315,7 @@ python setup_permissions.py
 | EMS_BACKMAN_MODEL | claude-haiku-4-5-20251001 | Backmanモデル |
 | EMS_FRONTMAN_MODEL | claude-haiku-4-5-20251001 | Frontmanモデル |
 | EMS_DB_PATH | memory.db | SQLite DBファイルパス |
+| EMS_VERBOSE | true | ツールレスポンスに感情タグ・スコアを表示（`false` で非表示） |
 
 ### トラブルシューティング
 
@@ -389,7 +393,7 @@ python scripts/demo.py
 | Phase 2 | フィードバックループ + 多様性制御 — DiversityWatchdog / ConsolidationEngine / 暗黙的フィードバック | 108件 PASS | 完了 |
 | Phase 3 | MCPサーバー + マルチプロバイダLLM — LLMAdapter / MCPServer | 138件 PASS | 完了 |
 | Phase 4 | APIキーレス委任 + 保安強化 + README改訂 + フィードバック実測基盤 | 147件 PASS | 完了 |
-| Phase 5 | 感情タグ付き関係性グラフ — RelationalGraph / エンティティ抽出 / グラフMCPツール3種 / 外部エンティティ渡し | 221件 PASS | 完了 |
+| Phase 5 | 感情タグ付き関係性グラフ — RelationalGraph / エンティティ抽出 / グラフMCPツール3種 / 外部エンティティ渡し / グラフ連鎖recall | 219件 PASS | 完了 |
 
 ### ディレクトリ構成
 
@@ -416,7 +420,7 @@ amygdala/
 │   ├── run_labeling.sh        # ラベリング実行スクリプト（Phase 4）
 │   ├── export_recall_log.py   # recall_log CSVエクスポーター（Phase 4）
 │   └── accuracy_report.py     # 精度レポート自動生成（Phase 4）
-├── tests/                    # 221テスト
+├── tests/                    # 219テスト
 ├── docs/
 │   ├── emotion-memory-system-proposal-v0.4.md
 │   └── relational-graph-design.md
