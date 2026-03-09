@@ -46,6 +46,29 @@ def test_from_env():
         del os.environ["EMS_DB_PATH"]
 
 
+def test_default_verbose_true():
+    """VERBOSE_TOOL_RESPONSE はデフォルトで True"""
+    cfg = Config()
+    assert cfg.VERBOSE_TOOL_RESPONSE is True
+
+
+def test_from_env_verbose_off():
+    """EMS_VERBOSE=false で VERBOSE_TOOL_RESPONSE=False になる"""
+    os.environ["EMS_VERBOSE"] = "false"
+    try:
+        cfg = Config.from_env()
+        assert cfg.VERBOSE_TOOL_RESPONSE is False
+    finally:
+        del os.environ["EMS_VERBOSE"]
+
+
+def test_from_env_verbose_default_true():
+    """EMS_VERBOSE 未設定ならデフォルト True"""
+    os.environ.pop("EMS_VERBOSE", None)
+    cfg = Config.from_env()
+    assert cfg.VERBOSE_TOOL_RESPONSE is True
+
+
 def test_emotion_axes():
     """EMOTION_AXESに8軸が含まれること"""
     cfg = Config()

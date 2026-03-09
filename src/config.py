@@ -56,6 +56,9 @@ class Config:
     COLD_START_BOOST: float = 1.5
     COLD_START_THRESHOLD: int = 50
 
+    # ツールレスポンス表示制御
+    VERBOSE_TOOL_RESPONSE: bool = True  # False で感情タグ・要約の詳細表示を抑制
+
     # 関係性グラフ
     GRAPH_MAX_ACTIVE_NODES: int = 100
     GRAPH_MAX_EDGES_PER_NODE: int = 20
@@ -67,8 +70,11 @@ class Config:
     @classmethod
     def from_env(cls) -> "Config":
         """環境変数でモデル切替可能（A1要件）"""
+        verbose_env = os.environ.get("EMS_VERBOSE", "true").lower()
+        verbose = verbose_env not in ("false", "0", "no", "off")
         return cls(
             DB_PATH=os.environ.get("EMS_DB_PATH", "memory.db"),
             BACKMAN_MODEL=os.environ.get("EMS_BACKMAN_MODEL", "claude-haiku-4-5-20251001"),
             FRONTMAN_MODEL=os.environ.get("EMS_FRONTMAN_MODEL", "claude-haiku-4-5-20251001"),
+            VERBOSE_TOOL_RESPONSE=verbose,
         )

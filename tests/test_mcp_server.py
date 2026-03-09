@@ -209,6 +209,25 @@ class TestStoreMemory:
         # クランプ後 joy=1.0
         assert result["score"] == pytest.approx(1.0)
 
+    def test_verbose_false_omits_emotion_and_score(self, mock_memory_system):
+        """VERBOSE_TOOL_RESPONSE=False なら emotion / score を省略する"""
+        mock_memory_system.config = Config(VERBOSE_TOOL_RESPONSE=False)
+        srv = EmotionMemoryMCPServer(memory_system=mock_memory_system)
+        mock_memory_system.backman.tag_emotion.return_value = {
+            "emotion": _emotion_vec(joy=0.8)
+        }
+        mock_cursor = MagicMock()
+        mock_cursor.lastrowid = 1
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value = mock_cursor
+        mock_memory_system.db.get_connection.return_value = mock_conn
+
+        result = srv.store_memory("test")
+
+        assert "memory_id" in result
+        assert "emotion" not in result
+        assert "score" not in result
+
     def test_store_memory_missing_axes_filled(self, server, mock_memory_system):
         """軸欠落 -> 0.0で補完（全軸のバリデーションが走る）"""
         # joy のみ指定、他は欠落
@@ -295,6 +314,26 @@ class TestRecallMemories:
         server.recall_memories("surprising event")
 
         mock_memory_system.diversity_watchdog.apply_exploration.assert_called_once()
+
+    def test_verbose_false_omits_emotion_and_score(self, mock_memory_system):
+        """VERBOSE_TOOL_RESPONSE=False なら recall 結果から emotion / score を省略"""
+        mock_memory_system.config = Config(VERBOSE_TOOL_RESPONSE=False)
+        srv = EmotionMemoryMCPServer(memory_system=mock_memory_system)
+        mock_memory_system.backman.tag_emotion.return_value = {
+            "emotion": _emotion_vec(joy=0.5)
+        }
+        results = self._make_search_results(2)
+        mock_memory_system.search_engine.search_memories.return_value = results
+        mock_memory_system.diversity_watchdog.apply_exploration.return_value = results
+
+        output = srv.recall_memories("テスト", top_n=2)
+
+        assert len(output) == 2
+        for item in output:
+            assert "id" in item
+            assert "content" in item
+            assert "emotion" not in item
+            assert "score" not in item
 
     def test_handles_flat_emotion_format(self, server, mock_memory_system):
         """DB raw形式（フラットキー）の探索結果も正しく処理する"""
@@ -595,3 +634,170 @@ class TestStoreMemoryGraphUpdate:
             result = server.store_memory("テスト")
             assert result["memory_id"] == 42
             assert "emotion" in result
+
+
+# ─── Graph-augmented recall ──────────────────────────────────────────────────
+
+@pytest.fixture
+def full_server():
+    """実DB(:memory:) + 実SearchEngine + 実DiversityWatchdog を使うサーバー。
+    グラフ連鎖recallのE2Eテスト用。
+    """
+    from src.search_engine import SearchEngine
+    from src.diversity_watchdog import DiversityWatchdog
+
+    config = Config(DB_PATH=":memory:")
+    db = DatabaseManager(":memory:")
+    db.init()
+
+    ms = MagicMock()
+    ms.config = config
+    ms.db = db
+    ms.backman.adapter = None
+    ms.search_engine = SearchEngine(config, db)
+    ms.diversity_watchdog = DiversityWatchdog(config, db)
+    ms.pin_memory.decrement_ttl.return_value = []
+
+    srv = EmotionMemoryMCPServer(memory_system=ms)
+    yield srv
+    db.close()
+
+
+def _insert_memory(db, content, **emotions):
+    """テスト用メモリ挿入ヘルパー"""
+    conn = db.get_connection()
+    vec = {ax: 0.0 for ax in EMOTION_AXES + META_AXES}
+    vec.update(emotions)
+    conn.execute(
+        """INSERT INTO memories
+           (content, raw_input,
+            joy, sadness, anger, fear, surprise, disgust, trust, anticipation,
+            importance, urgency)
+           VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (content,
+         vec["joy"], vec["sadness"], vec["anger"], vec["fear"],
+         vec["surprise"], vec["disgust"], vec["trust"], vec["anticipation"],
+         vec["importance"], vec["urgency"]),
+    )
+    conn.commit()
+    return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+
+class TestGraphAugmentedRecall:
+    """グラフ1ホップ展開で関連メモリも取得できることを検証する"""
+
+    def test_recall_finds_graph_related_memory(self, full_server):
+        """直接ヒットしないメモリがグラフ経由で見つかる"""
+        srv = full_server
+        db = srv.memory_system.db
+        emo = _graph_emotion(joy=0.7, trust=0.5, importance=0.6)
+
+        # メモリ1: "NPC設計" を含む
+        _insert_memory(db, "amygdalaの着想はNPC設計から来ている", joy=0.7, trust=0.5, importance=0.6)
+
+        # メモリ2: "ITW" を含む（NPC設計とは直接無関係なテキスト）
+        _insert_memory(db, "ITWは疑似TRPGゲームで、amygdalaの元々の導入先だった", joy=0.5, trust=0.4, importance=0.5)
+
+        # グラフ: NPC設計 → amygdala → ITW の関係を構築
+        srv.graph_engine.upsert_node("NPC設計", "topic", emo)
+        srv.graph_engine.upsert_node("amygdala", "topic", emo)
+        srv.graph_engine.upsert_node("ITW", "topic", emo)
+        srv.graph_engine.upsert_edge("NPC設計", "amygdala", emo, ["着想元"])
+        srv.graph_engine.upsert_edge("amygdala", "ITW", emo, ["導入先"])
+
+        # "NPC設計" で検索 → ITWのメモリもグラフ経由で取れるはず
+        results = srv.recall_memories(
+            "NPC設計",
+            top_n=10,
+            emotions_input={"joy": 0.7, "trust": 0.5, "importance": 0.6,
+                            "sadness": 0, "anger": 0, "fear": 0,
+                            "surprise": 0, "disgust": 0, "anticipation": 0, "urgency": 0},
+        )
+
+        contents = [r["content"] for r in results]
+        assert any("NPC設計" in c for c in contents), "直接ヒットがない"
+        assert any("ITW" in c for c in contents), "グラフ経由のITWメモリが見つからない"
+
+    def test_graph_expansion_respects_top_n(self, full_server):
+        """グラフ展開しても top_n を超えない"""
+        srv = full_server
+        db = srv.memory_system.db
+        emo = _graph_emotion(joy=0.5, importance=0.5)
+
+        # 大量のメモリとグラフを作成
+        for i in range(10):
+            _insert_memory(db, f"Entity{i}に関する記憶", joy=0.5, importance=0.5)
+            srv.graph_engine.upsert_node(f"Entity{i}", "topic", emo)
+
+        for i in range(1, 10):
+            srv.graph_engine.upsert_edge("Entity0", f"Entity{i}", emo, ["関連"])
+
+        results = srv.recall_memories(
+            "Entity0",
+            top_n=3,
+            emotions_input={"joy": 0.5, "importance": 0.5,
+                            "sadness": 0, "anger": 0, "fear": 0,
+                            "surprise": 0, "disgust": 0, "trust": 0,
+                            "anticipation": 0, "urgency": 0},
+        )
+
+        assert len(results) <= 3
+
+    def test_no_graph_entities_still_works(self, full_server):
+        """グラフにエンティティがなくても通常のrecallが動作する"""
+        srv = full_server
+        db = srv.memory_system.db
+        _insert_memory(db, "普通の記憶", joy=0.8, importance=0.3)
+
+        results = srv.recall_memories(
+            "普通",
+            top_n=5,
+            emotions_input={"joy": 0.8, "importance": 0.3,
+                            "sadness": 0, "anger": 0, "fear": 0,
+                            "surprise": 0, "disgust": 0, "trust": 0,
+                            "anticipation": 0, "urgency": 0},
+        )
+
+        assert len(results) >= 1
+        assert any("普通の記憶" in r["content"] for r in results)
+
+    def test_graph_failure_does_not_break_recall(self, full_server):
+        """グラフ展開が失敗しても recall は正常に結果を返す"""
+        srv = full_server
+        db = srv.memory_system.db
+        _insert_memory(db, "安全なメモリ", trust=0.9, importance=0.5)
+
+        with patch.object(srv, "_graph_augmented_candidates", side_effect=Exception("graph boom")):
+            results = srv.recall_memories(
+                "安全",
+                top_n=5,
+                emotions_input={"trust": 0.9, "importance": 0.5,
+                                "joy": 0, "sadness": 0, "anger": 0, "fear": 0,
+                                "surprise": 0, "disgust": 0, "anticipation": 0, "urgency": 0},
+            )
+
+        assert len(results) >= 1
+
+    def test_no_duplicate_results(self, full_server):
+        """グラフ展開で同じメモリが重複して返らない"""
+        srv = full_server
+        db = srv.memory_system.db
+        emo = _graph_emotion(joy=0.8, trust=0.6, importance=0.7)
+
+        # 両方のエンティティに言及するメモリ
+        _insert_memory(db, "AlphaとBetaの関係について", joy=0.8, trust=0.6, importance=0.7)
+
+        srv.graph_engine.upsert_node("Alpha", "topic", emo)
+        srv.graph_engine.upsert_node("Beta", "topic", emo)
+        srv.graph_engine.upsert_edge("Alpha", "Beta", emo, ["関連"])
+
+        results = srv.recall_memories(
+            "Alpha Beta",
+            top_n=10,
+            emotions_input={"joy": 0.8, "trust": 0.6, "importance": 0.7,
+                            "sadness": 0, "anger": 0, "fear": 0,
+                            "surprise": 0, "disgust": 0, "anticipation": 0, "urgency": 0},
+        )
+
+        ids = [r["id"] for r in results]
+        assert len(ids) == len(set(ids)), "重複IDが存在する"

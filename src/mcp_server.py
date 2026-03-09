@@ -24,7 +24,7 @@ class EmotionMemoryMCPServer:
     def __init__(self, memory_system: Optional[Any] = None) -> None:
         if memory_system is None:
             import os
-            config = Config()
+            config = Config.from_env()
             db = DatabaseManager.from_config(config)
             db.init()
             if os.environ.get("ANTHROPIC_API_KEY"):
@@ -303,11 +303,10 @@ class EmotionMemoryMCPServer:
         except Exception as e:
             logger.warning(f"Graph update on store_memory failed: {e}")
 
-        result = {
-            "memory_id": cursor.lastrowid,
-            "emotion": dominant_emotion,
-            "score": dominant_score,
-        }
+        result = {"memory_id": cursor.lastrowid}
+        if ms.config.VERBOSE_TOOL_RESPONSE:
+            result["emotion"] = dominant_emotion
+            result["score"] = dominant_score
         if used_zero_vector:
             result["warning"] = (
                 "Auto-tagging unavailable (no ANTHROPIC_API_KEY). "
@@ -324,6 +323,7 @@ class EmotionMemoryMCPServer:
     ) -> List[Dict]:
         """
         クエリに基づいて感情ベース検索を実行する。
+        グラフ1ホップ展開で関連メモリも候補に含める。
 
         Args:
             query: 検索クエリ
@@ -367,14 +367,32 @@ class EmotionMemoryMCPServer:
         results = ms.search_engine.search_memories(emotion_vec, [])
         results = ms.diversity_watchdog.apply_exploration(results, emotion_vec)
 
+        # グラフ1ホップ展開（非致命的）
+        try:
+            graph_candidates = self._graph_augmented_candidates(
+                query, results, emotion_vec
+            )
+            if graph_candidates:
+                existing_ids = {r["id"] for r in results}
+                for c in graph_candidates:
+                    if c["id"] not in existing_ids:
+                        results.append(c)
+                        existing_ids.add(c["id"])
+                results.sort(key=lambda x: x.get("score", 0), reverse=True)
+        except Exception as e:
+            logger.warning(f"Graph-augmented recall failed: {e}")
+
+        verbose = ms.config.VERBOSE_TOOL_RESPONSE
         output = []
         for m in results[:top_n]:
-            output.append({
+            entry = {
                 "id": m["id"],
                 "content": m["content"],
-                "emotion": self._get_dominant_emotion(m, ms.config),
-                "score": float(m.get("score", m.get("relevance_score", 0.0))),
-            })
+            }
+            if verbose:
+                entry["emotion"] = self._get_dominant_emotion(m, ms.config)
+                entry["score"] = float(m.get("score", m.get("relevance_score", 0.0)))
+            output.append(entry)
         if used_zero_vector:
             return {
                 "results": output,
@@ -385,6 +403,68 @@ class EmotionMemoryMCPServer:
                 ),
             }
         return output
+
+    def _graph_augmented_candidates(
+        self,
+        query: str,
+        initial_results: List[Dict],
+        emotion_vec: Dict[str, float],
+    ) -> List[Dict]:
+        """グラフ1ホップ展開で関連メモリ候補を取得する。
+
+        1. クエリと初期結果からエンティティを特定
+        2. 1ホップ先の関連エンティティを取得
+        3. 関連エンティティに言及するメモリを検索・スコアリング
+        """
+        ms = self.memory_system
+        conn = ms.db.get_connection()
+
+        # Step 1: 既知エンティティをクエリ+初期結果テキストから特定
+        nodes = conn.execute(
+            "SELECT label, aliases FROM graph_nodes WHERE archived = FALSE"
+        ).fetchall()
+
+        texts = [query] + [r["content"] for r in initial_results[:5]]
+        found_labels = set()
+
+        for node in nodes:
+            label = node["label"]
+            aliases = json.loads(node["aliases"]) if node["aliases"] else []
+            for name in [label] + aliases:
+                if any(name in t for t in texts):
+                    found_labels.add(label)
+                    break
+
+        if not found_labels:
+            return []
+
+        # Step 2: 1ホップ先の関連エンティティラベルを取得
+        related_labels = set()
+        for label in found_labels:
+            ctx = self.graph_engine.get_entity_context(label, hops=1)
+            if ctx:
+                related_labels.update(ctx["related_entities"])
+
+        expand_labels = related_labels - found_labels
+        if not expand_labels:
+            return []
+
+        # Step 3: 関連エンティティに言及するメモリを検索
+        initial_ids = {r["id"] for r in initial_results}
+        conditions = " OR ".join(["content LIKE ?"] * len(expand_labels))
+        params = [f"%{lbl}%" for lbl in expand_labels]
+
+        rows = conn.execute(
+            f"SELECT * FROM memories WHERE archived = FALSE AND ({conditions})",
+            params
+        ).fetchall()
+
+        rows = [r for r in rows if r["id"] not in initial_ids]
+        if not rows:
+            return []
+
+        # Step 4: 同じスコアリングロジックで評価
+        return ms.search_engine.score_memory_rows(rows, emotion_vec, [])
 
     def get_stats(self) -> Dict:
         """

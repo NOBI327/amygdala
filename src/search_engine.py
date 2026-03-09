@@ -67,49 +67,32 @@ class SearchEngine:
             half_life = self.config.HALF_LIFE_NORMAL
         return 0.5 ** (days_ago / half_life)
 
-    def search_memories(self, emotion_vec: Dict[str, float], scenes: List[str],
-                         top_k: Optional[int] = None) -> List[Dict]:
-        """
-        長期記憶DBを検索し、複合スコア上位の記憶を返す。
+    def score_memory_rows(self, rows, emotion_vec: Dict[str, float],
+                           scenes: List[str]) -> List[Dict]:
+        """メモリ行リストを感情ベクトルでスコアリングする。
 
-        アルゴリズム（B1準拠）:
-        1. archived=FalseのDB全記憶を取得
-        2. 各記憶の複合スコア計算:
-           - emotion_sim: EMOTION_AXES（8軸）のコサイン類似度
-           - meta_score: META_AXES（2軸）のコサイン類似度
-           - scene_sim: Jaccard
-           - time_decay: 0.5^(days/half_life) ← v0.4.1修正版
-           - feedback_weight: min(relevance_score / 5.0, 2.0)
-           - score = (emotion_sim * EMOTION_WEIGHT + scene_sim * SCENE_WEIGHT)
-                     * time_decay * feedback_weight
-                     + meta_score * META_WEIGHT
-        3. スコア降順でtop_k件を返す
+        search_memoriesと同じスコアリングロジックを適用する。
+        外部から取得済みの行を渡すことで、グラフ展開等での再利用が可能。
+
+        Args:
+            rows: SQLite Row or dict のリスト
+            emotion_vec: 検索クエリの感情ベクトル
+            scenes: 検索クエリのシーンリスト
 
         Returns:
-            [{"id": int, "content": str, "emotion": dict, "scenes": list,
-              "score": float, "timestamp": str, "pinned_flag": bool,
-              "recall_count": int, "relevance_score": float}]
+            スコア降順のメモリdictリスト
         """
-        k = top_k if top_k is not None else self.config.TOP_K_RESULTS
-        conn = self.db.get_connection()
-        rows = conn.execute(
-            "SELECT * FROM memories WHERE archived = FALSE"
-        ).fetchall()
-
         now = datetime.now(timezone.utc)
         scored = []
         for row in rows:
             mem = dict(row)
-            # 感情ベクトル復元
             mem_emotion = {ax: mem.get(ax, 0.0) for ax in
                            list(self.config.EMOTION_AXES) + list(self.config.META_AXES)}
-            # 場面タグ復元
             try:
                 mem_scenes = json.loads(mem.get("scenes", "[]"))
             except (json.JSONDecodeError, TypeError):
                 mem_scenes = []
 
-            # 日数計算
             try:
                 ts = datetime.fromisoformat(mem["timestamp"].replace("Z", "+00:00"))
                 if ts.tzinfo is None:
@@ -148,6 +131,30 @@ class SearchEngine:
             })
 
         scored.sort(key=lambda x: x["score"], reverse=True)
+        return scored
+
+    def search_memories(self, emotion_vec: Dict[str, float], scenes: List[str],
+                         top_k: Optional[int] = None) -> List[Dict]:
+        """
+        長期記憶DBを検索し、複合スコア上位の記憶を返す。
+
+        アルゴリズム（B1準拠）:
+        1. archived=FalseのDB全記憶を取得
+        2. 各記憶の複合スコア計算（score_memory_rowsに委譲）
+        3. スコア降順でtop_k件を返す
+
+        Returns:
+            [{"id": int, "content": str, "emotion": dict, "scenes": list,
+              "score": float, "timestamp": str, "pinned_flag": bool,
+              "recall_count": int, "relevance_score": float}]
+        """
+        k = top_k if top_k is not None else self.config.TOP_K_RESULTS
+        conn = self.db.get_connection()
+        rows = conn.execute(
+            "SELECT * FROM memories WHERE archived = FALSE"
+        ).fetchall()
+
+        scored = self.score_memory_rows(rows, emotion_vec, scenes)
         return scored[:k]
 
     def log_recall(self, memory_ids: List[int], was_used: bool,
