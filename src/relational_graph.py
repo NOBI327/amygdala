@@ -682,9 +682,16 @@ class RelationalGraphEngine:
 
     # ========== 統合エントリポイント ==========
 
-    def process_turn(self, text: str, emotion_vec: dict) -> dict:
-        """テキストからエンティティ抽出→グラフ更新→減衰→制約適用の一連フロー"""
-        entities = self.extract_entities(text, emotion_vec)
+    def process_turn(self, text: str, emotion_vec: dict, entities: list | None = None) -> dict:
+        """テキストからエンティティ抽出→グラフ更新→減衰→制約適用の一連フロー
+
+        Args:
+            text: 対話テキスト
+            emotion_vec: 感情ベクトル
+            entities: 外部から渡すエンティティリスト（省略時は内部LLMで抽出）
+        """
+        if entities is None:
+            entities = self.extract_entities(text, emotion_vec)
         if not entities:
             return {"updated": False}
 

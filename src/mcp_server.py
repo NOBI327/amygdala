@@ -71,11 +71,12 @@ class EmotionMemoryMCPServer:
             context: Optional[str] = None,
             emotions: Optional[Dict[str, float]] = None,
             scenes: Optional[List[str]] = None,
+            entities: Optional[List[Dict]] = None,
         ) -> Dict:
             """感情タギングしてメモリをDBに保存する。
 
             emotions引数は全10軸の感情スコアをdictで渡す(0.0-1.0)。
-            省略した場合、内部LLMで自動タギングする（ANTHROPIC_API_KEY必要）。
+            省略した場合、内部LLMで自動タギングする(ANTHROPIC_API_KEY必要)。
             APIキー未設定時はemotionsを明示的に渡すことを強く推奨。
             省略時はゼロベクターとなり検索精度が低下する。
 
@@ -84,8 +85,19 @@ class EmotionMemoryMCPServer:
             例(Claude CodeなどLLMクライアントから呼ぶ場合):
             emotions={"joy":0.8,"sadness":0.0,"anger":0.0,"fear":0.0,"surprise":0.2,"disgust":0.0,"trust":0.5,"anticipation":0.3,"importance":0.6,"urgency":0.1}
             scenes=["work","learning"]  # 最大3個
+
+            entities引数でエンティティ情報を渡すと関係性グラフを構築する。
+            省略した場合、内部LLMで自動抽出する(ANTHROPIC_API_KEY必要)。
+            APIキー未設定時はentitiesを明示的に渡すことを強く推奨。
+
+            例:
+            entities=[
+              {"label":"amygdala","type":"topic","aliases":["感情記憶システム"],"relations":[{"target":"SAFL","tags":["部品","コンポーネント"]}]},
+              {"label":"SAFL","type":"topic","aliases":["Self-Awareness Functional Layer"]}
+            ]
+            type: person | topic | item | place | event
             """
-            result = server.store_memory(text, context, emotions, scenes)
+            result = server.store_memory(text, context, emotions, scenes, entities)
             expired = server._tick_pin_ttl()
             if expired:
                 result["pin_ttl_expired"] = server.memory_system.pin_memory.generate_ttl_prompt(expired)
@@ -196,6 +208,7 @@ class EmotionMemoryMCPServer:
         context: Optional[str] = None,
         emotions_input: Optional[Any] = None,
         scenes_input: Optional[Any] = None,
+        entities_input: Optional[Any] = None,
     ) -> Dict:
         """
         テキストを感情タギングしてDBに保存する。
@@ -270,9 +283,23 @@ class EmotionMemoryMCPServer:
         )
         conn.commit()
 
+        # エンティティ入力のパース
+        entities = None
+        if entities_input:
+            try:
+                if isinstance(entities_input, str):
+                    entities = json.loads(entities_input)
+                elif isinstance(entities_input, list):
+                    entities = entities_input
+                else:
+                    raise TypeError(f"Unsupported type: {type(entities_input)}")
+            except (json.JSONDecodeError, TypeError, ValueError) as e:
+                logger.warning(f"Invalid entities_input: {e}. Falling back to LLM extraction.")
+                entities = None
+
         # グラフ更新（非致命的）
         try:
-            self.graph_engine.process_turn(text, emotion)
+            self.graph_engine.process_turn(text, emotion, entities=entities)
         except Exception as e:
             logger.warning(f"Graph update on store_memory failed: {e}")
 

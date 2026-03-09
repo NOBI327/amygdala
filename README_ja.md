@@ -4,8 +4,8 @@
 
 [![English](https://img.shields.io/badge/lang-en-blue)](README.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-147%20passed-brightgreen)]()
-[![Coverage](https://img.shields.io/badge/coverage-93%25-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-221%20passed-brightgreen)]()
+[![Coverage](https://img.shields.io/badge/coverage-73%25-brightgreen)]()
 
 ---
 
@@ -70,6 +70,9 @@
 ### ピンメモリ（3枠）
 「これ忘れないで」と言えば、重要な情報をワーキングメモリに固定。10ターンごとに「まだ必要？」と確認し、不要になれば高い重要度で長期記憶に移管。
 
+### 感情タグ付き関係性グラフ
+会話に登場するエンティティ（人物・話題・プロジェクト等）を抽出し、関係性グラフとして構築。各ノード・エッジは感情ベクトルを持ち、「この人物に関連するトピックは？」といった検索が可能。グラフは時間とともに減衰し、頻繁に言及されるエンティティは残り、忘れられたものはフェードアウトする。
+
 ### エコーチェンバー防止
 同じ記憶ばかり繰り返し想起されるのを防ぐ多様性モニタリング。偏りが検知されると、別カテゴリの記憶を自動で混入させる。
 
@@ -89,6 +92,7 @@ graph TD
         SearchEngine["SearchEngine\n感情重みづけ検索"]
         DiversityWatchdog["DiversityWatchdog\nエコチャンバー防止 (Phase 2)"]
         ConsolidationEngine["ConsolidationEngine\n再タギング・フィードバックループ (Phase 2)"]
+        RelationalGraph["RelationalGraph\n関係性グラフエンジン (Phase 5)"]
         WorkingMemory["WorkingMemory\n直近10ターン"]
         PinMemory["PinMemory\n明示的固定記憶"]
         Frontman["Frontman\n会話エージェント / Claude Code"]
@@ -96,7 +100,7 @@ graph TD
 
     LongTermDB[("LongTermDB\nSQLite")]
     LLMAdapter["LLMAdapter\nAnthropic / OpenAI / Gemini"]
-    MCPServer["MCPServer\nstdio transport (Phase 3)"]
+    MCPServer["MCPServer\nstdio transport (Phase 3)\n9ツール"]
 
     Backman --> LLMAdapter
     Frontman --> LLMAdapter
@@ -105,6 +109,7 @@ graph TD
     SearchEngine --> LongTermDB
     ConsolidationEngine --> LongTermDB
     PinMemory --> LongTermDB
+    RelationalGraph --> LongTermDB
     DiversityWatchdog --> SearchEngine
 
     MemorySystem --> Frontman
@@ -120,13 +125,16 @@ graph TD
 Backman: 感情+場面タグ付け（10軸ベクトル生成）
     │
     ▼
+RelationalGraph: エンティティ抽出 → グラフ更新 → 減衰（Phase 5）
+    │
+    ▼
 SearchEngine: 長期記憶検索（感情 × 場面 × 時間）
     │
     ▼
 DiversityWatchdog: 多様性注入（エコーチェンバー防止）
     │
     ▼
-Frontman: コンテキスト組立 + 応答生成
+Frontman: コンテキスト組立 + 応答生成（グラフコンテキスト含む）
     │
     ▼
 WorkingMemory更新 → 10ターン超過で長期記憶に移管
@@ -188,7 +196,7 @@ APIモードを有効にする場合:
 export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
-> **技術仕様（インテグレーター向け）**: Claude Codeモードでは、MCPサーバー内部での自動タギングが無効になります。Claude Codeはツール説明文を読み、会話の文脈から `emotions` スコアを自動的に渡すため、ユーザー側の操作は不要です。独自クライアントからMCPツールを直接呼び出す場合は、`emotions` パラメータを自前で提供する必要があります。
+> **技術仕様（インテグレーター向け）**: Claude Codeモードでは、MCPサーバー内部での自動タギング・エンティティ抽出が無効になります。Claude Codeはツール説明文を読み、会話の文脈から `emotions` スコアと `entities` データを自動的に渡すため、ユーザー側の操作は不要です。独自クライアントからMCPツールを直接呼び出す場合は、`emotions` と `entities` パラメータを自前で提供する必要があります。
 
 > **セキュリティ上の注意**
 > - APIキーは環境変数で管理してください。設定ファイル（`.claude.json` 等）への直接記載は**非推奨**です
@@ -251,7 +259,7 @@ claude          # Claude Code起動
 
 ### 5. 一括パーミッション設定（推奨）
 
-デフォルトではClaude CodeがAmygdalaのツールを呼ぶたびに確認が求められます。全6機能を一度に許可するには:
+デフォルトではClaude CodeがAmygdalaのツールを呼ぶたびに確認が求められます。全9機能を一度に許可するには:
 
 ```bash
 python setup_permissions.py
@@ -264,6 +272,7 @@ python setup_permissions.py
 
   1. 記憶の保存
      テキストに感情タグ（joy, trust等10軸）を付与してDBに保存する。
+     エンティティ情報を渡すと関係性グラフも構築する。
 
   2. 記憶の検索
      感情ベースでDBから関連する記憶を検索・取得する。
@@ -279,6 +288,15 @@ python setup_permissions.py
 
   6. ピン一覧
      現在ピン止めされている記憶の一覧とTTL残数を表示する。
+
+  7. エンティティグラフ検索
+     関係性グラフから特定エンティティとその接続を検索する。
+
+  8. エンティティ一覧
+     関係性グラフ上のアクティブなエンティティ一覧を表示する。
+
+  9. エンティティ削除
+     関係性グラフからエンティティとそのエッジをアーカイブする。
 
 全機能を許可しますか？ [Y/n]: y
 → セットアップ完了。以降は確認なしで全機能が使える。
@@ -371,6 +389,7 @@ python scripts/demo.py
 | Phase 2 | フィードバックループ + 多様性制御 — DiversityWatchdog / ConsolidationEngine / 暗黙的フィードバック | 108件 PASS | 完了 |
 | Phase 3 | MCPサーバー + マルチプロバイダLLM — LLMAdapter / MCPServer | 138件 PASS | 完了 |
 | Phase 4 | APIキーレス委任 + 保安強化 + README改訂 + フィードバック実測基盤 | 147件 PASS | 完了 |
+| Phase 5 | 感情タグ付き関係性グラフ — RelationalGraph / エンティティ抽出 / グラフMCPツール3種 / 外部エンティティ渡し | 221件 PASS | 完了 |
 
 ### ディレクトリ構成
 
@@ -386,8 +405,9 @@ amygdala/
 │   ├── search_engine.py      # SearchEngine（感情重みづけ検索）
 │   ├── reconsolidation.py    # ConsolidationEngine（Phase 2）
 │   ├── diversity_watchdog.py # DiversityWatchdog（Phase 2）
+│   ├── relational_graph.py   # RelationalGraph（Phase 5: 関係性グラフエンジン）
 │   ├── llm_adapter.py        # LLMAdapter（Phase 3: マルチプロバイダ）
-│   ├── mcp_server.py         # MCPServer（Phase 3: stdio transport）
+│   ├── mcp_server.py         # MCPServer（Phase 3: stdio transport、9ツール）
 │   └── memory_system.py      # MemorySystem（オーケストレーター）
 ├── scripts/
 │   ├── init_db.py
@@ -396,9 +416,10 @@ amygdala/
 │   ├── run_labeling.sh        # ラベリング実行スクリプト（Phase 4）
 │   ├── export_recall_log.py   # recall_log CSVエクスポーター（Phase 4）
 │   └── accuracy_report.py     # 精度レポート自動生成（Phase 4）
-├── tests/                    # 147テスト、93%カバレッジ
+├── tests/                    # 221テスト
 ├── docs/
-│   └── emotion-memory-system-proposal-v0.4.md
+│   ├── emotion-memory-system-proposal-v0.4.md
+│   └── relational-graph-design.md
 └── requirements.txt
 ```
 

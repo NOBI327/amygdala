@@ -4,8 +4,8 @@
 
 [![日本語](https://img.shields.io/badge/lang-ja-blue)](README_ja.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-147%20passed-brightgreen)]()
-[![Coverage](https://img.shields.io/badge/coverage-93%25-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-221%20passed-brightgreen)]()
+[![Coverage](https://img.shields.io/badge/coverage-73%25-brightgreen)]()
 
 ---
 
@@ -70,6 +70,9 @@ Even after `/clear` or session disconnect, memories stored in the long-term DB r
 ### Pin Memory (3 Slots)
 Say "remember this" to anchor important information. Every 10 turns the system checks: "Still need this?" If released, the memory is transferred to long-term storage with high priority.
 
+### Emotion-Tagged Relational Graph
+Entities (people, topics, projects, etc.) mentioned in conversations are extracted and linked into a relational graph. Each node and edge carries an emotion vector, enabling queries like "what topics are connected to this person?" The graph decays over time — frequently mentioned entities stay prominent while forgotten ones fade.
+
 ### Echo Chamber Prevention
 DiversityWatchdog monitors for repetitive recall of the same memories. When imbalance is detected, memories from other categories are automatically injected.
 
@@ -89,6 +92,7 @@ graph TD
         SearchEngine["SearchEngine\nEmotion-Weighted Search"]
         DiversityWatchdog["DiversityWatchdog\nEcho Chamber Prevention (Phase 2)"]
         ConsolidationEngine["ConsolidationEngine\nRe-tagging & Feedback Loop (Phase 2)"]
+        RelationalGraph["RelationalGraph\nEntity Graph Engine (Phase 5)"]
         WorkingMemory["WorkingMemory\nLast 10 Turns"]
         PinMemory["PinMemory\nExplicit Pinned Memory"]
         Frontman["Frontman\nConversation Agent / Claude Code"]
@@ -96,7 +100,7 @@ graph TD
 
     LongTermDB[("LongTermDB\nSQLite")]
     LLMAdapter["LLMAdapter\nAnthropic / OpenAI / Gemini"]
-    MCPServer["MCPServer\nstdio transport (Phase 3)"]
+    MCPServer["MCPServer\nstdio transport (Phase 3)\n9 tools"]
 
     Backman --> LLMAdapter
     Frontman --> LLMAdapter
@@ -105,6 +109,7 @@ graph TD
     SearchEngine --> LongTermDB
     ConsolidationEngine --> LongTermDB
     PinMemory --> LongTermDB
+    RelationalGraph --> LongTermDB
     DiversityWatchdog --> SearchEngine
 
     MemorySystem --> Frontman
@@ -120,13 +125,16 @@ User Input
 Backman: Emotion + Scene Tagging (10-axis vector generation)
     │
     ▼
+RelationalGraph: Entity extraction → graph update → decay (Phase 5)
+    │
+    ▼
 SearchEngine: Long-term memory retrieval (emotion × scene × time)
     │
     ▼
 DiversityWatchdog: Diversity injection (echo chamber prevention)
     │
     ▼
-Frontman: Context assembly + response generation
+Frontman: Context assembly + response generation (with graph context)
     │
     ▼
 WorkingMemory update → transfer to long-term memory after 10 turns
@@ -188,7 +196,7 @@ To enable API mode:
 export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
-> **Technical note (for integrators)**: In Claude Code mode, the MCP server cannot auto-tag emotions internally. Claude Code reads the tool descriptions and automatically provides `emotions` scores based on conversation context — no user action is required. If you are building a custom client that calls these MCP tools directly, you must provide the `emotions` parameter yourself.
+> **Technical note (for integrators)**: In Claude Code mode, the MCP server cannot auto-tag emotions or extract entities internally. Claude Code reads the tool descriptions and automatically provides `emotions` scores and `entities` data based on conversation context — no user action is required. If you are building a custom client that calls these MCP tools directly, you must provide the `emotions` and `entities` parameters yourself.
 
 > **Security Note**
 > - Manage your API key via environment variables. Direct inclusion in config files (`.claude.json`, etc.) is **not recommended**.
@@ -251,7 +259,7 @@ If you see `emotion-memory: connected`, you're good to go.
 
 ### 5. Bulk Permission Setup (Recommended)
 
-By default, Claude Code asks for confirmation each time an Amygdala tool is called. To approve all 6 tools at once with a description of each, run:
+By default, Claude Code asks for confirmation each time an Amygdala tool is called. To approve all 9 tools at once with a description of each, run:
 
 ```bash
 python setup_permissions.py
@@ -264,6 +272,7 @@ python setup_permissions.py
 
   1. Store Memory
      Tag text with emotion scores (10 axes: joy, trust, etc.) and save to DB.
+     Optionally pass entities to build the relational graph.
 
   2. Recall Memories
      Search and retrieve relevant memories by emotional similarity.
@@ -279,6 +288,15 @@ python setup_permissions.py
 
   6. List Pinned Memories
      Show currently pinned memories with their TTL remaining.
+
+  7. Query Entity Graph
+     Search the relational graph for a specific entity and its connections.
+
+  8. List Graph Entities
+     List all active entities in the relational graph.
+
+  9. Forget Entity
+     Archive an entity and its edges from the relational graph.
 
 Approve all? [Y/n]: y
 → Done. All tools registered in .claude/settings.local.json.
@@ -371,6 +389,7 @@ See [proposal v0.4](docs/emotion-memory-system-proposal-v0.4.md) for details.
 | Phase 2 | Feedback loop + diversity control — DiversityWatchdog / ConsolidationEngine / implicit feedback | 108 PASS | Done |
 | Phase 3 | MCP server + multi-provider LLM — LLMAdapter / MCPServer | 138 PASS | Done |
 | Phase 4 | API-keyless delegation + security hardening + README overhaul + eval infrastructure | 147 PASS | Done |
+| Phase 5 | Emotion-tagged relational graph — RelationalGraph / entity extraction / 3 graph MCP tools / external entity passthrough | 221 PASS | Done |
 
 ### Directory Structure
 
@@ -386,8 +405,9 @@ amygdala/
 │   ├── search_engine.py      # SearchEngine (emotion-weighted search)
 │   ├── reconsolidation.py    # ConsolidationEngine (Phase 2)
 │   ├── diversity_watchdog.py # DiversityWatchdog (Phase 2)
+│   ├── relational_graph.py   # RelationalGraph (Phase 5: entity graph engine)
 │   ├── llm_adapter.py        # LLMAdapter (Phase 3: multi-provider)
-│   ├── mcp_server.py         # MCPServer (Phase 3: stdio transport)
+│   ├── mcp_server.py         # MCPServer (Phase 3: stdio transport, 9 tools)
 │   └── memory_system.py      # MemorySystem (orchestrator)
 ├── scripts/
 │   ├── init_db.py
@@ -396,9 +416,10 @@ amygdala/
 │   ├── run_labeling.sh        # Labeling workflow runner (Phase 4)
 │   ├── export_recall_log.py   # recall_log CSV exporter (Phase 4)
 │   └── accuracy_report.py     # Accuracy report generator (Phase 4)
-├── tests/                    # 147 tests, 93% coverage
+├── tests/                    # 221 tests
 ├── docs/
-│   └── emotion-memory-system-proposal-v0.4.md
+│   ├── emotion-memory-system-proposal-v0.4.md
+│   └── relational-graph-design.md
 └── requirements.txt
 ```
 
