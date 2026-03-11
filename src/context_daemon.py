@@ -181,7 +181,7 @@ class ContextDaemon:
                 self.stop()
             signal.signal(signal.SIGTERM, _handle_sigterm)
 
-        # 起動時の最新IDを取得（起動前の既存レコードはスキップ）
+        # 起動時の最新IDを取得し、初期コンテキストを生成
         try:
             self._last_memory_id = self._get_latest_memory_id()
             logger.info(
@@ -189,8 +189,24 @@ class ContextDaemon:
                 f"last_memory_id={self._last_memory_id}, "
                 f"poll_interval={self.config.DAEMON_POLL_INTERVAL_SEC}s"
             )
+            # 初期発火: 既存メモリがあれば最新メモリでコンテキストを生成
+            if self._last_memory_id > 0:
+                memory = self._get_memory_by_id(self._last_memory_id)
+                if memory:
+                    emotion_vec = self._extract_emotion_vec(memory)
+                    scenes = self._extract_scenes(memory)
+                    results = self.recall_for_context(
+                        emotion_vec, scenes, self.config.DAEMON_RECALL_TOP_K
+                    )
+                    self._write_context_file(
+                        self._last_memory_id, emotion_vec, scenes, results
+                    )
+                    logger.info(
+                        f"Initial context generated from memory_id={self._last_memory_id}, "
+                        f"recalled={len(results)} memories"
+                    )
         except Exception as e:
-            logger.warning(f"Failed to get initial memory ID: {e}")
+            logger.warning(f"Failed to initialize daemon: {e}")
 
         try:
             while self._running:
