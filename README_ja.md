@@ -4,8 +4,8 @@
 
 [![English](https://img.shields.io/badge/lang-en-blue)](README.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-219%20passed-brightgreen)]()
-[![Coverage](https://img.shields.io/badge/coverage-85%25-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-246%20passed-brightgreen)]()
+[![Coverage](https://img.shields.io/badge/coverage-82%25-brightgreen)]()
 
 ---
 
@@ -76,6 +76,9 @@
 ### グラフ連鎖リコール
 記憶検索時、関係性グラフを辿って間接的に関連する記憶も発見する。例えば「Taro」で検索すると、グラフ上に Taro → Python → FastAPI の接続があれば、FastAPI に関する記憶も浮上する。グラフ経由で見つかった候補には加算ブーストが適用され、検索結果の上位に入りやすくなる。
 
+### 自動コンテキストデーモン（プロアクティブ想起）
+バックグラウンドデーモンがメモリDBの新規INSERTを監視。新しい記憶が保存されると、感情的に関連する記憶を自動検索し、結果を一時ファイルに書き出す。`get_active_context` ツールでこの事前計算済みコンテキストを取得でき、「言われなくても思い出す」を実現する。デーモンはMCPサーバーのサブプロセスとして起動し、起動レイテンシへの影響はゼロ。
+
 ### エコーチェンバー防止
 同じ記憶ばかり繰り返し想起されるのを防ぐ多様性モニタリング。偏りが検知されると、別カテゴリの記憶を自動で混入させる。
 
@@ -103,11 +106,14 @@ graph TD
 
     LongTermDB[("LongTermDB\nSQLite")]
     LLMAdapter["LLMAdapter\nAnthropic / OpenAI / Gemini"]
-    MCPServer["MCPServer\nstdio transport (Phase 3)\n9ツール"]
+    ContextDaemon["ContextDaemon\n自動コンテキストデーモン (Phase 6)\nポーリング＋プロアクティブ想起"]
+    MCPServer["MCPServer\nstdio transport (Phase 3)\n10ツール"]
 
     Backman --> LLMAdapter
     Frontman --> LLMAdapter
     MCPServer --> MemorySystem
+    ContextDaemon --> LongTermDB
+    MCPServer -.->|コンテキストファイル読取| ContextDaemon
     WorkingMemory --> LongTermDB
     SearchEngine --> LongTermDB
     ConsolidationEngine --> LongTermDB
@@ -262,7 +268,7 @@ claude          # Claude Code起動
 
 ### 5. 一括パーミッション設定（推奨）
 
-デフォルトではClaude CodeがAmygdalaのツールを呼ぶたびに確認が求められます。全9機能を一度に許可するには:
+デフォルトではClaude CodeがAmygdalaのツールを呼ぶたびに確認が求められます。全10機能を一度に許可するには:
 
 ```bash
 python setup_permissions.py
@@ -301,6 +307,9 @@ python setup_permissions.py
   9. エンティティ削除
      関係性グラフからエンティティとそのエッジをアーカイブする。
 
+ 10. アクティブコンテキスト取得
+     バックグラウンドデーモンが自動recallしたメモリを返す。毎ターン呼び出し推奨。
+
 全機能を許可しますか？ [Y/n]: y
 → セットアップ完了。以降は確認なしで全機能が使える。
 ```
@@ -316,6 +325,8 @@ python setup_permissions.py
 | EMS_FRONTMAN_MODEL | claude-haiku-4-5-20251001 | Frontmanモデル |
 | EMS_DB_PATH | memory.db | SQLite DBファイルパス |
 | EMS_VERBOSE | true | ツールレスポンスに感情タグ・スコアを表示（`false` で非表示） |
+| EMS_DAEMON_POLL_INTERVAL | 2.0 | デーモンのポーリング間隔（秒） |
+| EMS_DAEMON_RECALL_TOP_K | 5 | デーモンがトリガーごとに自動recallするメモリ件数 |
 
 ### トラブルシューティング
 
@@ -394,6 +405,7 @@ python scripts/demo.py
 | Phase 3 | MCPサーバー + マルチプロバイダLLM — LLMAdapter / MCPServer | 138件 PASS | 完了 |
 | Phase 4 | APIキーレス委任 + 保安強化 + README改訂 + フィードバック実測基盤 | 147件 PASS | 完了 |
 | Phase 5 | 感情タグ付き関係性グラフ — RelationalGraph / エンティティ抽出 / グラフMCPツール3種 / 外部エンティティ渡し / グラフ連鎖recall | 219件 PASS | 完了 |
+| Phase 6 | 自動コンテキストデーモン — ContextDaemon / プロアクティブ想起 / get_active_context MCPツール / ノンブロッキングサブプロセス起動 | 246件 PASS | 完了 |
 
 ### ディレクトリ構成
 
@@ -411,7 +423,8 @@ amygdala/
 │   ├── diversity_watchdog.py # DiversityWatchdog（Phase 2）
 │   ├── relational_graph.py   # RelationalGraph（Phase 5: 関係性グラフエンジン）
 │   ├── llm_adapter.py        # LLMAdapter（Phase 3: マルチプロバイダ）
-│   ├── mcp_server.py         # MCPServer（Phase 3: stdio transport、9ツール）
+│   ├── mcp_server.py         # MCPServer（Phase 3: stdio transport、10ツール）
+│   ├── context_daemon.py     # ContextDaemon（Phase 6: 自動コンテキストポーリング）
 │   └── memory_system.py      # MemorySystem（オーケストレーター）
 ├── scripts/
 │   ├── init_db.py
@@ -420,10 +433,11 @@ amygdala/
 │   ├── run_labeling.sh        # ラベリング実行スクリプト（Phase 4）
 │   ├── export_recall_log.py   # recall_log CSVエクスポーター（Phase 4）
 │   └── accuracy_report.py     # 精度レポート自動生成（Phase 4）
-├── tests/                    # 219テスト
+├── tests/                    # 246テスト
 ├── docs/
 │   ├── emotion-memory-system-proposal-v0.4.md
-│   └── relational-graph-design.md
+│   ├── relational-graph-design.md
+│   └── auto-context-daemon-design.md
 └── requirements.txt
 ```
 

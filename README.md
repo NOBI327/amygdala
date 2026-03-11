@@ -4,8 +4,8 @@
 
 [![日本語](https://img.shields.io/badge/lang-ja-blue)](README_ja.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-219%20passed-brightgreen)]()
-[![Coverage](https://img.shields.io/badge/coverage-85%25-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-246%20passed-brightgreen)]()
+[![Coverage](https://img.shields.io/badge/coverage-82%25-brightgreen)]()
 
 ---
 
@@ -76,6 +76,9 @@ Entities (people, topics, projects, etc.) mentioned in conversations are extract
 ### Graph-Augmented Recall
 When recalling memories, the system traverses the relational graph to find indirectly related memories. For example, searching for "Taro" also surfaces memories about "FastAPI" if Taro → Python → FastAPI connections exist in the graph. Graph-linked candidates receive an additive score boost to rank higher in results.
 
+### Auto-Context Daemon (Proactive Recall)
+A background daemon monitors the memory database for new entries. When a new memory is stored, the daemon automatically searches for emotionally related memories and writes the results to a temporary file. The `get_active_context` tool returns this pre-computed context, enabling the AI to "remember without being asked." The daemon runs as a subprocess alongside the MCP server with zero impact on startup latency.
+
 ### Echo Chamber Prevention
 DiversityWatchdog monitors for repetitive recall of the same memories. When imbalance is detected, memories from other categories are automatically injected.
 
@@ -103,11 +106,14 @@ graph TD
 
     LongTermDB[("LongTermDB\nSQLite")]
     LLMAdapter["LLMAdapter\nAnthropic / OpenAI / Gemini"]
-    MCPServer["MCPServer\nstdio transport (Phase 3)\n9 tools"]
+    ContextDaemon["ContextDaemon\nAuto-Context Daemon (Phase 6)\nPolling + Proactive Recall"]
+    MCPServer["MCPServer\nstdio transport (Phase 3)\n10 tools"]
 
     Backman --> LLMAdapter
     Frontman --> LLMAdapter
     MCPServer --> MemorySystem
+    ContextDaemon --> LongTermDB
+    MCPServer -.->|reads context file| ContextDaemon
     WorkingMemory --> LongTermDB
     SearchEngine --> LongTermDB
     ConsolidationEngine --> LongTermDB
@@ -262,7 +268,7 @@ If you see `emotion-memory: connected`, you're good to go.
 
 ### 5. Bulk Permission Setup (Recommended)
 
-By default, Claude Code asks for confirmation each time an Amygdala tool is called. To approve all 9 tools at once with a description of each, run:
+By default, Claude Code asks for confirmation each time an Amygdala tool is called. To approve all 10 tools at once with a description of each, run:
 
 ```bash
 python setup_permissions.py
@@ -301,6 +307,9 @@ python setup_permissions.py
   9. Forget Entity
      Archive an entity and its edges from the relational graph.
 
+ 10. Get Active Context
+     Return auto-recalled memories from the background daemon. Call every turn for proactive recall.
+
 Approve all? [Y/n]: y
 → Done. All tools registered in .claude/settings.local.json.
 ```
@@ -316,6 +325,8 @@ This only needs to be run once per project.
 | EMS_FRONTMAN_MODEL | claude-haiku-4-5-20251001 | Frontman model |
 | EMS_DB_PATH | memory.db | SQLite DB file path |
 | EMS_VERBOSE | true | Show emotion tags and scores in tool responses (set `false` to hide) |
+| EMS_DAEMON_POLL_INTERVAL | 2.0 | Daemon polling interval in seconds |
+| EMS_DAEMON_RECALL_TOP_K | 5 | Number of memories the daemon auto-recalls per trigger |
 
 ### Troubleshooting
 
@@ -394,6 +405,7 @@ See [proposal v0.4](docs/emotion-memory-system-proposal-v0.4.md) for details.
 | Phase 3 | MCP server + multi-provider LLM — LLMAdapter / MCPServer | 138 PASS | Done |
 | Phase 4 | API-keyless delegation + security hardening + README overhaul + eval infrastructure | 147 PASS | Done |
 | Phase 5 | Emotion-tagged relational graph — RelationalGraph / entity extraction / 3 graph MCP tools / external entity passthrough / graph-augmented recall | 219 PASS | Done |
+| Phase 6 | Auto-context daemon — ContextDaemon / proactive recall / get_active_context MCP tool / non-blocking subprocess launch | 246 PASS | Done |
 
 ### Directory Structure
 
@@ -411,7 +423,8 @@ amygdala/
 │   ├── diversity_watchdog.py # DiversityWatchdog (Phase 2)
 │   ├── relational_graph.py   # RelationalGraph (Phase 5: entity graph engine)
 │   ├── llm_adapter.py        # LLMAdapter (Phase 3: multi-provider)
-│   ├── mcp_server.py         # MCPServer (Phase 3: stdio transport, 9 tools)
+│   ├── mcp_server.py         # MCPServer (Phase 3: stdio transport, 10 tools)
+│   ├── context_daemon.py     # ContextDaemon (Phase 6: auto-context polling)
 │   └── memory_system.py      # MemorySystem (orchestrator)
 ├── scripts/
 │   ├── init_db.py
@@ -420,10 +433,11 @@ amygdala/
 │   ├── run_labeling.sh        # Labeling workflow runner (Phase 4)
 │   ├── export_recall_log.py   # recall_log CSV exporter (Phase 4)
 │   └── accuracy_report.py     # Accuracy report generator (Phase 4)
-├── tests/                    # 219 tests
+├── tests/                    # 246 tests
 ├── docs/
 │   ├── emotion-memory-system-proposal-v0.4.md
-│   └── relational-graph-design.md
+│   ├── relational-graph-design.md
+│   └── auto-context-daemon-design.md
 └── requirements.txt
 ```
 
