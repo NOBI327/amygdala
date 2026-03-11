@@ -20,6 +20,10 @@ import tempfile
 from datetime import datetime, timezone
 
 
+# Windows で stdout が CP932 になる問題を回避
+sys.stdout.reconfigure(encoding="utf-8")
+
+
 def get_context_file_path() -> str:
     """context.json のパスを算出する（create_secure_tmpdir と同じロジック）。"""
     return os.path.join(
