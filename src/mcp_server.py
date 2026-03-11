@@ -238,7 +238,7 @@ class EmotionMemoryMCPServer:
             return {"recalled_memories": [], "status": "read_error"}
 
     def _start_daemon(self) -> None:
-        """コンテキストデーモンをサブプロセスとして起動する。"""
+        """コンテキストデーモンをサブプロセスとして起動する（ノンブロッキング）。"""
         try:
             self._daemon_tmpdir = create_secure_tmpdir()
             config = self.memory_system.config
@@ -251,26 +251,15 @@ class EmotionMemoryMCPServer:
                 [sys.executable, "-m", "src.context_daemon",
                  "--db-path", db_path],
                 cwd=project_root,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
 
-            # 起動直後にプロセスが即死していないか確認
-            import time
-            time.sleep(0.3)
-            if self._daemon_process.poll() is not None:
-                _, stderr_out = self._daemon_process.communicate(timeout=2)
-                logger.warning(
-                    f"Context daemon exited immediately "
-                    f"(code={self._daemon_process.returncode}): "
-                    f"{stderr_out.decode('utf-8', errors='replace')}"
-                )
-                self._daemon_process = None
-            else:
-                logger.info(
-                    f"Context daemon started (PID={self._daemon_process.pid}, "
-                    f"cwd={project_root}, db={db_path})"
-                )
+            logger.info(
+                f"Context daemon launched (PID={self._daemon_process.pid}, "
+                f"cwd={project_root}, db={db_path})"
+            )
         except Exception as e:
             logger.warning(f"Failed to start context daemon: {e}")
             self._daemon_process = None
