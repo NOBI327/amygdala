@@ -68,14 +68,25 @@ class Config:
     GRAPH_HOP_LIMIT: int = 2
     GRAPH_BOOST: float = 0.03  # グラフ連鎖recallで見つけた候補への加算ブースト
 
+    # 自動コンテキストデーモン設定
+    DAEMON_POLL_INTERVAL_SEC: float = 2.0     # ポーリング間隔（秒）
+    DAEMON_MAX_BACKOFF_SEC: float = 60.0      # エラー時の最大バックオフ（秒）
+    DAEMON_RECALL_TOP_K: int = 5              # デーモンの自動recall件数
+
     @classmethod
     def from_env(cls) -> "Config":
         """環境変数でモデル切替可能（A1要件）"""
         verbose_env = os.environ.get("EMS_VERBOSE", "true").lower()
         verbose = verbose_env not in ("false", "0", "no", "off")
+        daemon_poll = float(os.environ.get("EMS_DAEMON_POLL_INTERVAL", "2.0"))
+        daemon_backoff = float(os.environ.get("EMS_DAEMON_MAX_BACKOFF", "60.0"))
+        daemon_top_k = int(os.environ.get("EMS_DAEMON_RECALL_TOP_K", "5"))
         return cls(
             DB_PATH=os.environ.get("EMS_DB_PATH", "memory.db"),
             BACKMAN_MODEL=os.environ.get("EMS_BACKMAN_MODEL", "claude-haiku-4-5-20251001"),
             FRONTMAN_MODEL=os.environ.get("EMS_FRONTMAN_MODEL", "claude-haiku-4-5-20251001"),
             VERBOSE_TOOL_RESPONSE=verbose,
+            DAEMON_POLL_INTERVAL_SEC=daemon_poll,
+            DAEMON_MAX_BACKOFF_SEC=daemon_backoff,
+            DAEMON_RECALL_TOP_K=daemon_top_k,
         )

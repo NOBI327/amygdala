@@ -1,10 +1,15 @@
+import atexit
 import json
 import logging
+import os
+import subprocess
+import sys
 from typing import Any, Dict, List, Optional
 
 from mcp.server.fastmcp import FastMCP
 
 from .config import Config
+from .context_daemon import create_secure_tmpdir
 from .db import DatabaseManager
 from .memory_system import MemorySystem
 from .relational_graph import RelationalGraphEngine
@@ -23,7 +28,6 @@ class EmotionMemoryMCPServer:
 
     def __init__(self, memory_system: Optional[Any] = None) -> None:
         if memory_system is None:
-            import os
             config = Config.from_env()
             db = DatabaseManager.from_config(config)
             db.init()
@@ -49,6 +53,8 @@ class EmotionMemoryMCPServer:
             llm_adapter=self.memory_system.backman.adapter,
         )
         self.mcp = FastMCP("EmotionMemoryServer")
+        self._daemon_process: Optional[subprocess.Popen] = None
+        self._daemon_tmpdir: str = ""
         self._register_tools()
 
     def _tick_pin_ttl(self) -> List[Dict]:
@@ -202,6 +208,75 @@ class EmotionMemoryMCPServer:
             server._tick_pin_ttl()
             return server.forget_entity(entity)
 
+        @self.mcp.tool()
+        def get_active_context() -> Dict:
+            """デーモンが自動生成した最新のアクティブコンテキストを返す。
+
+            memoriesテーブルへの新規INSERT検知時に、感情ベクトル＋シーンタグで
+            自動検索した結果を返す。毎ターンの呼び出しを推奨。
+
+            戻り値:
+              recalled_memories: 上位N件の関連メモリ
+              updated_at: 最終更新日時
+              trigger_emotion: 検索に使った感情ベクトル
+              trigger_scenes: 検索に使ったシーンタグ
+              source_memory_id: トリガーとなったメモリのID
+            """
+            server._tick_pin_ttl()
+            return server.get_active_context()
+
+    def get_active_context(self) -> Dict:
+        """デーモンが書き出した一時ファイルからアクティブコンテキストを読む。"""
+        context_file = os.path.join(self._daemon_tmpdir, "context.json")
+        if not self._daemon_tmpdir or not os.path.exists(context_file):
+            return {"recalled_memories": [], "status": "no_context_available"}
+        try:
+            with open(context_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(f"Failed to read context file: {e}")
+            return {"recalled_memories": [], "status": "read_error"}
+
+    def _start_daemon(self) -> None:
+        """コンテキストデーモンをサブプロセスとして起動する。"""
+        try:
+            self._daemon_tmpdir = create_secure_tmpdir()
+            config = self.memory_system.config
+            db_path = config.DB_PATH
+
+            self._daemon_process = subprocess.Popen(
+                [sys.executable, "-m", "src.context_daemon",
+                 "--db-path", db_path],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            logger.info(
+                f"Context daemon started (PID={self._daemon_process.pid})"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to start context daemon: {e}")
+            self._daemon_process = None
+
+    def _cleanup_daemon(self) -> None:
+        """デーモンプロセスの停止と一時ファイルのクリーンアップ。"""
+        if self._daemon_process and self._daemon_process.poll() is None:
+            self._daemon_process.terminate()
+            try:
+                self._daemon_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._daemon_process.kill()
+
+        # Windows環境ではデーモンのatexitが発火しないため、
+        # MCPサーバー側で一時ファイルを削除する
+        if self._daemon_tmpdir:
+            context_file = os.path.join(self._daemon_tmpdir, "context.json")
+            for path in [context_file, context_file + ".tmp"]:
+                try:
+                    if os.path.exists(path):
+                        os.remove(path)
+                except OSError:
+                    pass
+
     def store_memory(
         self,
         text: str,
@@ -253,6 +328,23 @@ class EmotionMemoryMCPServer:
                 emotion = {ax: 0.0 for ax in list(ms.config.EMOTION_AXES) + list(ms.config.META_AXES)}
                 used_zero_vector = True
 
+        # scenes_input のパース（JSON文字列/リスト対応、最大3件制限）
+        scenes = []
+        if scenes_input:
+            try:
+                if isinstance(scenes_input, str):
+                    scenes = json.loads(scenes_input)
+                elif isinstance(scenes_input, list):
+                    scenes = scenes_input
+                else:
+                    raise TypeError(f"Unsupported type: {type(scenes_input)}")
+                if not isinstance(scenes, list):
+                    scenes = []
+                scenes = [str(s) for s in scenes[:3]]
+            except (json.JSONDecodeError, TypeError, ValueError) as e:
+                logger.warning(f"Invalid scenes_input: {e}. Using empty scenes.")
+                scenes = []
+
         dominant_emotion, dominant_score = max(
             ((ax, float(emotion.get(ax, 0.0))) for ax in ms.config.EMOTION_AXES),
             key=lambda x: x[1],
@@ -264,8 +356,8 @@ class EmotionMemoryMCPServer:
             """INSERT INTO memories
                (content, raw_input,
                 joy, sadness, anger, fear, surprise, disgust, trust, anticipation,
-                importance, urgency)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                importance, urgency, scenes)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 text,
                 context or "",
@@ -279,6 +371,7 @@ class EmotionMemoryMCPServer:
                 emotion.get("anticipation", 0.0),
                 emotion.get("importance", 0.0),
                 emotion.get("urgency", 0.0),
+                json.dumps(scenes, ensure_ascii=False),
             ),
         )
         conn.commit()
@@ -636,6 +729,8 @@ class EmotionMemoryMCPServer:
 
     def run(self) -> None:
         """stdio transportでMCPサーバーを起動する"""
+        self._start_daemon()
+        atexit.register(self._cleanup_daemon)
         self.mcp.run(transport="stdio")
 
 
