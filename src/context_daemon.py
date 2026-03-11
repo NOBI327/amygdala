@@ -147,12 +147,11 @@ class ContextDaemon:
         os.replace(tmp_path, self._context_file)
 
     def _cleanup(self) -> None:
-        """一時ファイルを削除する（best effort）。"""
-        try:
-            if self._context_file and os.path.exists(self._context_file):
-                os.remove(self._context_file)
-        except OSError:
-            pass
+        """一時ファイルのクリーンアップ（best effort）。
+
+        context.json は次セッションのSessionStart hookで読むため削除しない。
+        .tmp ファイル（書き込み途中の中間ファイル）のみ削除する。
+        """
         try:
             tmp_path = self._context_file + ".tmp"
             if tmp_path and os.path.exists(tmp_path):

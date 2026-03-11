@@ -4,7 +4,7 @@
 
 [![English](https://img.shields.io/badge/lang-en-blue)](README.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-246%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-285%20passed-brightgreen)]()
 [![Coverage](https://img.shields.io/badge/coverage-82%25-brightgreen)]()
 
 ---
@@ -79,6 +79,9 @@
 ### 自動コンテキストデーモン（プロアクティブ想起）
 バックグラウンドデーモンがメモリDBの新規INSERTを監視。新しい記憶が保存されると、感情的に関連する記憶を自動検索し、結果を一時ファイルに書き出す。`get_active_context` ツールでこの事前計算済みコンテキストを取得でき、「言われなくても思い出す」を実現する。デーモンはMCPサーバーのサブプロセスとして起動し、起動レイテンシへの影響はゼロ。
 
+### セッションフック（自動記憶注入）
+Claude Codeの新セッション開始時にSessionStartフックが自動発火し、直近の記憶コンテキストを注入する。ユーザーの操作もLLMのツール呼び出し判断も不要。デーモンが残したキャッシュファイル（感情ベース検索結果）を読むか、DBから最新N件をフォールバック取得する。約170msで完了し、500msの目標を大幅にクリア。
+
 ### エコーチェンバー防止
 同じ記憶ばかり繰り返し想起されるのを防ぐ多様性モニタリング。偏りが検知されると、別カテゴリの記憶を自動で混入させる。
 
@@ -107,6 +110,7 @@ graph TD
     LongTermDB[("LongTermDB\nSQLite")]
     LLMAdapter["LLMAdapter\nAnthropic / OpenAI / Gemini"]
     ContextDaemon["ContextDaemon\n自動コンテキストデーモン (Phase 6)\nポーリング＋プロアクティブ想起"]
+    SessionHook["SessionHook\nセッションフック (Phase 7)\n自動記憶注入"]
     MCPServer["MCPServer\nstdio transport (Phase 3)\n10ツール"]
 
     Backman --> LLMAdapter
@@ -114,6 +118,7 @@ graph TD
     MCPServer --> MemorySystem
     ContextDaemon --> LongTermDB
     MCPServer -.->|コンテキストファイル読取| ContextDaemon
+    SessionHook -.->|context.json or DB読取| LongTermDB
     WorkingMemory --> LongTermDB
     SearchEngine --> LongTermDB
     ConsolidationEngine --> LongTermDB
@@ -406,6 +411,7 @@ python scripts/demo.py
 | Phase 4 | APIキーレス委任 + 保安強化 + README改訂 + フィードバック実測基盤 | 147件 PASS | 完了 |
 | Phase 5 | 感情タグ付き関係性グラフ — RelationalGraph / エンティティ抽出 / グラフMCPツール3種 / 外部エンティティ渡し / グラフ連鎖recall | 219件 PASS | 完了 |
 | Phase 6 | 自動コンテキストデーモン — ContextDaemon / プロアクティブ想起 / get_active_context MCPツール / ノンブロッキングサブプロセス起動 | 246件 PASS | 完了 |
+| Phase 7 | セッションフック自動リコール — SessionStartフック / context.json永続化 / DBフォールバック / セッション開始時の自動記憶注入 | 285件 PASS | 完了 |
 
 ### ディレクトリ構成
 
@@ -425,6 +431,7 @@ amygdala/
 │   ├── llm_adapter.py        # LLMAdapter（Phase 3: マルチプロバイダ）
 │   ├── mcp_server.py         # MCPServer（Phase 3: stdio transport、10ツール）
 │   ├── context_daemon.py     # ContextDaemon（Phase 6: 自動コンテキストポーリング）
+│   ├── session_hook.py       # SessionHook（Phase 7: SessionStart自動リコール）
 │   └── memory_system.py      # MemorySystem（オーケストレーター）
 ├── scripts/
 │   ├── init_db.py
@@ -433,11 +440,12 @@ amygdala/
 │   ├── run_labeling.sh        # ラベリング実行スクリプト（Phase 4）
 │   ├── export_recall_log.py   # recall_log CSVエクスポーター（Phase 4）
 │   └── accuracy_report.py     # 精度レポート自動生成（Phase 4）
-├── tests/                    # 246テスト
+├── tests/                    # 285テスト
 ├── docs/
 │   ├── emotion-memory-system-proposal-v0.4.md
 │   ├── relational-graph-design.md
-│   └── auto-context-daemon-design.md
+│   ├── auto-context-daemon-design.md
+│   └── session-hook-auto-recall-design.md
 └── requirements.txt
 ```
 

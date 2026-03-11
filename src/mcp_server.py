@@ -273,16 +273,15 @@ class EmotionMemoryMCPServer:
             except subprocess.TimeoutExpired:
                 self._daemon_process.kill()
 
-        # Windows環境ではデーモンのatexitが発火しないため、
-        # MCPサーバー側で一時ファイルを削除する
+        # context.json は次セッションのSessionStart hookで読むため削除しない。
+        # .tmp ファイル（書き込み途中の中間ファイル）のみ削除する。
         if self._daemon_tmpdir:
-            context_file = os.path.join(self._daemon_tmpdir, "context.json")
-            for path in [context_file, context_file + ".tmp"]:
-                try:
-                    if os.path.exists(path):
-                        os.remove(path)
-                except OSError:
-                    pass
+            tmp_path = os.path.join(self._daemon_tmpdir, "context.json.tmp")
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except OSError:
+                pass
 
     def store_memory(
         self,

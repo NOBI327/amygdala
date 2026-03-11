@@ -4,7 +4,7 @@
 
 [![日本語](https://img.shields.io/badge/lang-ja-blue)](README_ja.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-246%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-285%20passed-brightgreen)]()
 [![Coverage](https://img.shields.io/badge/coverage-82%25-brightgreen)]()
 
 ---
@@ -79,6 +79,9 @@ When recalling memories, the system traverses the relational graph to find indir
 ### Auto-Context Daemon (Proactive Recall)
 A background daemon monitors the memory database for new entries. When a new memory is stored, the daemon automatically searches for emotionally related memories and writes the results to a temporary file. The `get_active_context` tool returns this pre-computed context, enabling the AI to "remember without being asked." The daemon runs as a subprocess alongside the MCP server with zero impact on startup latency.
 
+### Session Hook (Automatic Memory Injection)
+When a new Claude Code session starts, a SessionStart hook automatically injects recent memory context — no user action or LLM tool-call decision needed. The hook reads the daemon's cached context file (emotion-based search results) or falls back to the latest N memories from the DB. Context is delivered to the LLM as initial session context in ~170ms, well within the 500ms budget.
+
 ### Echo Chamber Prevention
 DiversityWatchdog monitors for repetitive recall of the same memories. When imbalance is detected, memories from other categories are automatically injected.
 
@@ -107,6 +110,7 @@ graph TD
     LongTermDB[("LongTermDB\nSQLite")]
     LLMAdapter["LLMAdapter\nAnthropic / OpenAI / Gemini"]
     ContextDaemon["ContextDaemon\nAuto-Context Daemon (Phase 6)\nPolling + Proactive Recall"]
+    SessionHook["SessionHook\nSessionStart Hook (Phase 7)\nAuto Memory Injection"]
     MCPServer["MCPServer\nstdio transport (Phase 3)\n10 tools"]
 
     Backman --> LLMAdapter
@@ -114,6 +118,7 @@ graph TD
     MCPServer --> MemorySystem
     ContextDaemon --> LongTermDB
     MCPServer -.->|reads context file| ContextDaemon
+    SessionHook -.->|reads context.json or DB| LongTermDB
     WorkingMemory --> LongTermDB
     SearchEngine --> LongTermDB
     ConsolidationEngine --> LongTermDB
@@ -406,6 +411,7 @@ See [proposal v0.4](docs/emotion-memory-system-proposal-v0.4.md) for details.
 | Phase 4 | API-keyless delegation + security hardening + README overhaul + eval infrastructure | 147 PASS | Done |
 | Phase 5 | Emotion-tagged relational graph — RelationalGraph / entity extraction / 3 graph MCP tools / external entity passthrough / graph-augmented recall | 219 PASS | Done |
 | Phase 6 | Auto-context daemon — ContextDaemon / proactive recall / get_active_context MCP tool / non-blocking subprocess launch | 246 PASS | Done |
+| Phase 7 | Session hook auto-recall — SessionStart hook / context.json persistence / DB fallback / automatic memory injection at session start | 285 PASS | Done |
 
 ### Directory Structure
 
@@ -425,6 +431,7 @@ amygdala/
 │   ├── llm_adapter.py        # LLMAdapter (Phase 3: multi-provider)
 │   ├── mcp_server.py         # MCPServer (Phase 3: stdio transport, 10 tools)
 │   ├── context_daemon.py     # ContextDaemon (Phase 6: auto-context polling)
+│   ├── session_hook.py       # SessionHook (Phase 7: SessionStart auto-recall)
 │   └── memory_system.py      # MemorySystem (orchestrator)
 ├── scripts/
 │   ├── init_db.py
@@ -433,11 +440,12 @@ amygdala/
 │   ├── run_labeling.sh        # Labeling workflow runner (Phase 4)
 │   ├── export_recall_log.py   # recall_log CSV exporter (Phase 4)
 │   └── accuracy_report.py     # Accuracy report generator (Phase 4)
-├── tests/                    # 246 tests
+├── tests/                    # 285 tests
 ├── docs/
 │   ├── emotion-memory-system-proposal-v0.4.md
 │   ├── relational-graph-design.md
-│   └── auto-context-daemon-design.md
+│   ├── auto-context-daemon-design.md
+│   └── session-hook-auto-recall-design.md
 └── requirements.txt
 ```
 

@@ -209,12 +209,25 @@ class TestContextFileIO:
         finally:
             daemon._cleanup()
 
-    def test_cleanup_removes_files(self, daemon):
+    def test_cleanup_preserves_context_json(self, daemon):
+        """context.json は次セッションの hook 用に残す。"""
         daemon._init_tmpdir()
         daemon._write_context_file(1, {}, [], [])
         assert os.path.exists(daemon.context_file_path)
         daemon._cleanup()
-        assert not os.path.exists(daemon.context_file_path)
+        assert os.path.exists(daemon.context_file_path)
+        # クリーンアップ
+        os.remove(daemon.context_file_path)
+
+    def test_cleanup_removes_tmp_file(self, daemon):
+        """.tmp ファイルは削除する。"""
+        daemon._init_tmpdir()
+        tmp_path = daemon.context_file_path + ".tmp"
+        with open(tmp_path, "w") as f:
+            f.write("tmp")
+        assert os.path.exists(tmp_path)
+        daemon._cleanup()
+        assert not os.path.exists(tmp_path)
 
 
 class TestExponentialBackoff:
