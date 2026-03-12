@@ -82,6 +82,9 @@ A background daemon monitors the memory database for new entries. When a new mem
 ### Session Hook (Automatic Memory Injection)
 When a new Claude Code session starts, a SessionStart hook automatically injects recent memory context — no user action or LLM tool-call decision needed. The hook reads the daemon's cached context file (emotion-based search results) or falls back to the latest N memories from the DB. Context is delivered to the LLM as initial session context in ~170ms, well within the 500ms budget.
 
+### Pattern-Triggered Activation (PTA)
+The MCP tool descriptions are designed as **pattern recognition prompts**, not decision prompts. Instead of asking the LLM "should you save this?", the description presents a checklist of conversational patterns (semantic weight, context shift, disclosure depth, compressed meaning) and instructs: "if you see any of these patterns, call the tool." This reframing from decision-making to pattern recognition — an LLM's strongest capability — dramatically improves autonomous store/recall invocation rates without any server-side code changes.
+
 ### Echo Chamber Prevention
 DiversityWatchdog monitors for repetitive recall of the same memories. When imbalance is detected, memories from other categories are automatically injected.
 
@@ -412,6 +415,7 @@ See [proposal v0.4](docs/emotion-memory-system-proposal-v0.4.md) for details.
 | Phase 5 | Emotion-tagged relational graph — RelationalGraph / entity extraction / 3 graph MCP tools / external entity passthrough / graph-augmented recall | 219 PASS | Done |
 | Phase 6 | Auto-context daemon — ContextDaemon / proactive recall / get_active_context MCP tool / non-blocking subprocess launch | 246 PASS | Done |
 | Phase 7 | Session hook auto-recall — SessionStart hook / context.json persistence / DB fallback / automatic memory injection at session start | 285 PASS | Done |
+| Phase 8 | Pattern-Triggered Activation (PTA) — store/recall description reframing from decision-making to pattern recognition / recall_memories zero-vector response fix / CLAUDE.md memory protocol | 285 PASS | Done |
 
 ### Directory Structure
 
@@ -445,7 +449,8 @@ amygdala/
 │   ├── emotion-memory-system-proposal-v0.4.md
 │   ├── relational-graph-design.md
 │   ├── auto-context-daemon-design.md
-│   └── session-hook-auto-recall-design.md
+│   ├── session-hook-auto-recall-design.md
+│   └── pta-v1-design.md
 └── requirements.txt
 ```
 

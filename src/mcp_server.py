@@ -79,29 +79,47 @@ class EmotionMemoryMCPServer:
             scenes: Optional[List[str]] = None,
             entities: Optional[List[Dict]] = None,
         ) -> Dict:
-            """感情タギングしてメモリをDBに保存する。
+            """Periodically (every few turns), scan the recent turns in context
+            for significance patterns. If any pattern detected, tag and store.
 
-            emotions引数は全10軸の感情スコアをdictで渡す(0.0-1.0)。
-            省略した場合、内部LLMで自動タギングする(ANTHROPIC_API_KEY必要)。
-            APIキー未設定時はemotionsを明示的に渡すことを強く推奨。
-            省略時はゼロベクターとなり検索精度が低下する。
+            PATTERN CHECKLIST (trigger if ANY detected):
+            1. Semantic weight — topic addresses strategic decisions,
+               architectural direction, project viability, or identity-level
+               concerns (not routine code instructions)
+            2. Context shift — topic changed significantly in recent turns
+               (e.g., from coding to personal reflection)
+            3. Disclosure depth — user revealed opinions, emotions, doubts,
+               or vulnerability beyond factual statements
+            4. Compressed meaning — short utterance carrying disproportionate
+               weight relative to its length
 
-            感情軸: joy, sadness, anger, fear, surprise, disgust, trust, anticipation, importance, urgency
+            WHEN TO SCAN:
+            - Every few turns, look back at recent conversation
 
-            例(Claude CodeなどLLMクライアントから呼ぶ場合):
-            emotions={"joy":0.8,"sadness":0.0,"anger":0.0,"fear":0.0,"surprise":0.2,"disgust":0.0,"trust":0.5,"anticipation":0.3,"importance":0.6,"urgency":0.1}
-            scenes=["work","learning"]  # 最大3個
+            WHAT TO STORE: the significant content with full 10-axis emotion
+            vector and scene tags. Compress multi-turn discussions into one
+            memory unit focusing on decisions and emotional context.
 
-            entities引数でエンティティ情報を渡すと関係性グラフを構築する。
-            省略した場合、内部LLMで自動抽出する(ANTHROPIC_API_KEY必要)。
-            APIキー未設定時はentitiesを明示的に渡すことを強く推奨。
+            DO NOT TRIGGER for routine development work (variable renames,
+            bug fixes, test runs, file operations, lint fixes).
 
-            例:
-            entities=[
-              {"label":"amygdala","type":"topic","aliases":["感情記憶システム"],"relations":[{"target":"SAFL","tags":["部品","コンポーネント"]}]},
-              {"label":"SAFL","type":"topic","aliases":["Self-Awareness Functional Layer"]}
-            ]
-            type: person | topic | item | place | event
+            Emotion axes (0.0-1.0):
+              joy, sadness, anger, fear, surprise, disgust,
+              trust, anticipation, importance, urgency
+
+            Scene tags (max 3):
+              work, relationship, hobby, health, learning,
+              daily, philosophy, meta
+
+            Entity extraction (optional):
+              entities=[{"label":"X","type":"person|topic|item|place|event",
+              "aliases":[],"relations":[{"target":"Y","tags":[]}]}]
+
+            Examples:
+              STORE: 'このプロジェクト畳もうかな' (semantic_weight)
+              STORE: coding → '最近ちょっと疲れた' (context_shift)
+              STORE: 'N-bodyの時と同じ失敗だ' (disclosure_depth + compressed)
+              SKIP: 'fix lint errors' / 'run tests' / 'add type annotations'
             """
             result = server.store_memory(text, context, emotions, scenes, entities)
             expired = server._tick_pin_ttl()
@@ -115,15 +133,36 @@ class EmotionMemoryMCPServer:
             top_n: int = 5,
             emotions: Optional[Dict[str, float]] = None,
         ) -> List:
-            """感情ベース検索でメモリを取得する。
+            """Periodically (every few turns), scan the recent turns in context
+            for patterns suggesting past memories would be relevant.
 
-            emotions引数で検索クエリの感情ベクトルを明示的に渡せる(0.0-1.0)。
-            省略時は内部LLMでクエリを感情タギングする（ANTHROPIC_API_KEY必要）。
-            APIキー未設定時はemotionsを明示的に渡すことを強く推奨。
+            PATTERN CHECKLIST (trigger if ANY detected):
+            1. Temporal reference — user mentions past events, prior decisions,
+               or specific time points ('前にこの問題やったよね',
+               'あの時決めた方針')
+            2. Structural echo — current situation mirrors a past decision
+               pattern (e.g., choosing between architectures again)
+            3. Regret signal — user expresses regret, self-correction, or
+               'same mistake again' sentiment
+            4. Explicit request — user directly asks about past conversations
+               or decisions ('あの時なんで X にしたんだっけ')
 
-            感情軸: joy, sadness, anger, fear, surprise, disgust, trust, anticipation, importance, urgency
+            WHEN TO SCAN:
+            - Every few turns (same cycle as store evaluation)
+            - Immediately when user explicitly asks about the past
 
-            例: emotions={"joy":0.3,"sadness":0.0,"anger":0.0,"fear":0.0,"surprise":0.0,"disgust":0.0,"trust":0.5,"anticipation":0.2,"importance":0.7,"urgency":0.1}
+            DO NOT TRIGGER for routine code tasks with no reference to
+            past decisions or experiences.
+
+            Args:
+              query: search query (describe the topic or context to recall)
+              top_n: max results (default 5)
+              emotions: emotion vector for emotion-based search (0.0-1.0)
+                axes: joy, sadness, anger, fear, surprise, disgust,
+                trust, anticipation, importance, urgency
+
+            Note: scenes filtering is not supported in recall. The server
+            searches across all scenes using the emotion vector only.
             """
             server._tick_pin_ttl()
             return server.recall_memories(query, top_n, emotions_input=emotions)
@@ -493,14 +532,14 @@ class EmotionMemoryMCPServer:
                 entry["score"] = float(m.get("score", m.get("relevance_score", 0.0)))
             output.append(entry)
         if used_zero_vector:
-            return {
-                "results": output,
+            warning_entry = {
                 "warning": (
                     "Auto-tagging unavailable (no ANTHROPIC_API_KEY). "
                     "Searched with zero vector — results may be inaccurate. "
                     "Provide emotions dict explicitly for accurate emotion-based search."
                 ),
             }
+            return [warning_entry] + output
         return output
 
     def _graph_augmented_candidates(
