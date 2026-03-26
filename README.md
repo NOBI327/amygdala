@@ -4,8 +4,8 @@
 
 [![日本語](https://img.shields.io/badge/lang-ja-blue)](README_ja.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-285%20passed-brightgreen)]()
-[![Coverage](https://img.shields.io/badge/coverage-82%25-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-330%20passed-brightgreen)]()
+[![Coverage](https://img.shields.io/badge/coverage-85%25-brightgreen)]()
 
 ---
 
@@ -85,6 +85,9 @@ When a new Claude Code session starts, a SessionStart hook automatically injects
 ### Pattern-Triggered Activation (PTA)
 The MCP tool descriptions are designed as **pattern recognition prompts**, not decision prompts. Instead of asking the LLM "should you save this?", the description presents a checklist of conversational patterns (semantic weight, context shift, disclosure depth, compressed meaning) and instructs: "if you see any of these patterns, call the tool." This reframing from decision-making to pattern recognition — an LLM's strongest capability — dramatically improves autonomous store/recall invocation rates without any server-side code changes.
 
+### Auto-Store Hook (Automatic Conversation Capture)
+A Claude Code **Stop hook** that fires every time the assistant finishes responding. The hook reads the conversation transcript (JSONL), extracts new user+assistant dialogue pairs, applies a loose significance filter (keyword heuristics for emotions, decisions, questions, and conversation length), and writes significant pairs directly to the memory database. This reduces dependency on the LLM's voluntary tool invocation — memories accumulate automatically regardless of whether the LLM calls `store_memory`. The hook uses only Python stdlib (no external dependencies), runs in under 1 second, and always exits cleanly to never block the session.
+
 ### Echo Chamber Prevention
 DiversityWatchdog monitors for repetitive recall of the same memories. When imbalance is detected, memories from other categories are automatically injected.
 
@@ -114,6 +117,7 @@ graph TD
     LLMAdapter["LLMAdapter\nAnthropic / OpenAI / Gemini"]
     ContextDaemon["ContextDaemon\nAuto-Context Daemon (Phase 6)\nPolling + Proactive Recall"]
     SessionHook["SessionHook\nSessionStart Hook (Phase 7)\nAuto Memory Injection"]
+    AutoStoreHook["AutoStoreHook\nStop Hook (Phase 9)\nAuto Conversation Capture"]
     MCPServer["MCPServer\nstdio transport (Phase 3)\n10 tools"]
 
     Backman --> LLMAdapter
@@ -122,6 +126,7 @@ graph TD
     ContextDaemon --> LongTermDB
     MCPServer -.->|reads context file| ContextDaemon
     SessionHook -.->|reads context.json or DB| LongTermDB
+    AutoStoreHook -.->|writes dialogue pairs| LongTermDB
     WorkingMemory --> LongTermDB
     SearchEngine --> LongTermDB
     ConsolidationEngine --> LongTermDB
@@ -416,6 +421,7 @@ See [proposal v0.4](docs/emotion-memory-system-proposal-v0.4.md) for details.
 | Phase 6 | Auto-context daemon — ContextDaemon / proactive recall / get_active_context MCP tool / non-blocking subprocess launch | 246 PASS | Done |
 | Phase 7 | Session hook auto-recall — SessionStart hook / context.json persistence / DB fallback / automatic memory injection at session start | 285 PASS | Done |
 | Phase 8 | Pattern-Triggered Activation (PTA) — store/recall description reframing from decision-making to pattern recognition / recall_memories zero-vector response fix / CLAUDE.md memory protocol | 285 PASS | Done |
+| Phase 9 | Auto-Store Stop Hook — automatic conversation capture via Claude Code Stop hook / transcript JSONL parsing / keyword-based significance filter / direct SQLite write / incremental processing | 330 PASS | Done |
 
 ### Directory Structure
 
@@ -436,6 +442,7 @@ amygdala/
 │   ├── mcp_server.py         # MCPServer (Phase 3: stdio transport, 10 tools)
 │   ├── context_daemon.py     # ContextDaemon (Phase 6: auto-context polling)
 │   ├── session_hook.py       # SessionHook (Phase 7: SessionStart auto-recall)
+│   ├── auto_store_hook.py    # AutoStoreHook (Phase 9: Stop hook auto-store)
 │   └── memory_system.py      # MemorySystem (orchestrator)
 ├── scripts/
 │   ├── init_db.py
@@ -444,7 +451,7 @@ amygdala/
 │   ├── run_labeling.sh        # Labeling workflow runner (Phase 4)
 │   ├── export_recall_log.py   # recall_log CSV exporter (Phase 4)
 │   └── accuracy_report.py     # Accuracy report generator (Phase 4)
-├── tests/                    # 285 tests
+├── tests/                    # 330 tests
 ├── docs/
 │   ├── emotion-memory-system-proposal-v0.4.md
 │   ├── relational-graph-design.md
