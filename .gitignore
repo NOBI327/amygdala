@@ -12,4 +12,6 @@ memory.db
 *.db
 .env
 .claude.json
+.claude/
 .mcp.json
+mcp_stderr.txt
