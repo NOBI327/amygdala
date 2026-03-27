@@ -82,6 +82,12 @@
 ### セッションフック（自動記憶注入）
 Claude Codeの新セッション開始時にSessionStartフックが自動発火し、直近の記憶コンテキストを注入する。ユーザーの操作もLLMのツール呼び出し判断も不要。デーモンが残したキャッシュファイル（感情ベース検索結果）を読むか、DBから最新N件をフォールバック取得する。約170msで完了し、500msの目標を大幅にクリア。
 
+### パターン認識型起動（PTA）
+MCPツールの説明文を**パターン認識プロンプト**として設計。「保存すべきか？」と判断を求めるのではなく、会話パターンのチェックリスト（意味的重要度、文脈の転換、内面の開示、圧縮された意味）を提示し「パターンが見えたらツールを呼べ」と指示する。意思決定→パターン認識というリフレーミングにより、LLMの最も得意な能力を活用し、サーバー側コード変更なしでstore/recallの自発的起動率を大幅に改善。
+
+### 自動保存フック（会話自動キャプチャ）
+Claude Codeの**Stopフック**として、アシスタントの応答完了時に毎回発火。トランスクリプト（JSONL）から対話ペアを抽出し、キーワードヒューリスティクスで重要度フィルタを適用し、**感情8軸のキーワードベース推定**（joy, sadness, anger, fear, surprise, disgust, trust, anticipation + importance, urgency）と共にメモリDBに直接書き込む。LLMの自発的ツール呼び出しに依存せず記憶が自動蓄積される。**グローバルフック**として設定されるため、amygdalaワークスペースだけでなく全プロジェクトで記憶がキャプチャされる。Python stdlibのみで動作（外部依存なし）、1秒以内に完了、セッションを一切ブロックしない。
+
 ### エコーチェンバー防止
 同じ記憶ばかり繰り返し想起されるのを防ぐ多様性モニタリング。偏りが検知されると、別カテゴリの記憶を自動で混入させる。
 
@@ -111,6 +117,7 @@ graph TD
     LLMAdapter["LLMAdapter\nAnthropic / OpenAI / Gemini"]
     ContextDaemon["ContextDaemon\n自動コンテキストデーモン (Phase 6)\nポーリング＋プロアクティブ想起"]
     SessionHook["SessionHook\nセッションフック (Phase 7)\n自動記憶注入"]
+    AutoStoreHook["AutoStoreHook\nStopフック (Phase 9)\n会話自動キャプチャ"]
     MCPServer["MCPServer\nstdio transport (Phase 3)\n10ツール"]
 
     Backman --> LLMAdapter
@@ -119,6 +126,7 @@ graph TD
     ContextDaemon --> LongTermDB
     MCPServer -.->|コンテキストファイル読取| ContextDaemon
     SessionHook -.->|context.json or DB読取| LongTermDB
+    AutoStoreHook -.->|対話ペアを書き込み| LongTermDB
     WorkingMemory --> LongTermDB
     SearchEngine --> LongTermDB
     ConsolidationEngine --> LongTermDB
@@ -412,6 +420,9 @@ python scripts/demo.py
 | Phase 5 | 感情タグ付き関係性グラフ — RelationalGraph / エンティティ抽出 / グラフMCPツール3種 / 外部エンティティ渡し / グラフ連鎖recall | 219件 PASS | 完了 |
 | Phase 6 | 自動コンテキストデーモン — ContextDaemon / プロアクティブ想起 / get_active_context MCPツール / ノンブロッキングサブプロセス起動 | 246件 PASS | 完了 |
 | Phase 7 | セッションフック自動リコール — SessionStartフック / context.json永続化 / DBフォールバック / セッション開始時の自動記憶注入 | 285件 PASS | 完了 |
+| Phase 8 | パターン認識型起動（PTA） — store/recall説明文を意思決定型→パターン認識型にリフレーミング / recall_memoriesゼロベクトル応答修正 / CLAUDE.mdメモリプロトコル | 285件 PASS | 完了 |
+| Phase 9 | 自動保存Stopフック — Claude Code Stopフックによる会話自動キャプチャ / transcript JSONLパース / キーワードベース重要度フィルタ / SQLite直接書き込み / インクリメンタル処理 | 330件 PASS | 完了 |
+| Phase 9.1 | 自動保存改善 — グローバルStopフック化（全プロジェクト対応） / キーワードベース感情8軸推定 / セッションフックのゼロベクトルフォールバック | 331件 PASS | 完了 |
 
 ### ディレクトリ構成
 
@@ -432,6 +443,7 @@ amygdala/
 │   ├── mcp_server.py         # MCPServer（Phase 3: stdio transport、10ツール）
 │   ├── context_daemon.py     # ContextDaemon（Phase 6: 自動コンテキストポーリング）
 │   ├── session_hook.py       # SessionHook（Phase 7: SessionStart自動リコール）
+│   ├── auto_store_hook.py    # AutoStoreHook（Phase 9: Stopフック自動保存）
 │   └── memory_system.py      # MemorySystem（オーケストレーター）
 ├── scripts/
 │   ├── init_db.py
@@ -440,12 +452,13 @@ amygdala/
 │   ├── run_labeling.sh        # ラベリング実行スクリプト（Phase 4）
 │   ├── export_recall_log.py   # recall_log CSVエクスポーター（Phase 4）
 │   └── accuracy_report.py     # 精度レポート自動生成（Phase 4）
-├── tests/                    # 285テスト
+├── tests/                    # 331テスト
 ├── docs/
 │   ├── emotion-memory-system-proposal-v0.4.md
 │   ├── relational-graph-design.md
 │   ├── auto-context-daemon-design.md
-│   └── session-hook-auto-recall-design.md
+│   ├── session-hook-auto-recall-design.md
+│   └── pta-v1-design.md
 └── requirements.txt
 ```
 
