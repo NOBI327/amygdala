@@ -4,8 +4,8 @@
 
 [![English](https://img.shields.io/badge/lang-en-blue)](README.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-285%20passed-brightgreen)]()
-[![Coverage](https://img.shields.io/badge/coverage-82%25-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-331%20passed-brightgreen)]()
+[![Coverage](https://img.shields.io/badge/coverage-85%25-brightgreen)]()
 
 ---
 

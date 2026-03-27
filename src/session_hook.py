@@ -214,12 +214,17 @@ def main() -> None:
         parser.add_argument("--max-age-hours", type=float, default=24.0)
         args = parser.parse_args()
 
-        # 1. context.json を試す
+        # 1. context.json を試す（ゼロベクトル検索結果はスキップ）
         context_path = get_context_file_path()
         data = read_context_file(context_path, args.max_age_hours)
         if data and data.get("recalled_memories"):
-            print(format_context_json(data))
-            return
+            trigger = data.get("trigger_emotion", {})
+            is_zero_vector = all(
+                float(v) == 0.0 for v in trigger.values()
+            ) if trigger else True
+            if not is_zero_vector:
+                print(format_context_json(data))
+                return
 
         # 2. DB フォールバック
         db_path = resolve_db_path(args.db_path)

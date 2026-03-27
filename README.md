@@ -4,7 +4,7 @@
 
 [![日本語](https://img.shields.io/badge/lang-ja-blue)](README_ja.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-330%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-331%20passed-brightgreen)]()
 [![Coverage](https://img.shields.io/badge/coverage-85%25-brightgreen)]()
 
 ---
@@ -86,7 +86,7 @@ When a new Claude Code session starts, a SessionStart hook automatically injects
 The MCP tool descriptions are designed as **pattern recognition prompts**, not decision prompts. Instead of asking the LLM "should you save this?", the description presents a checklist of conversational patterns (semantic weight, context shift, disclosure depth, compressed meaning) and instructs: "if you see any of these patterns, call the tool." This reframing from decision-making to pattern recognition — an LLM's strongest capability — dramatically improves autonomous store/recall invocation rates without any server-side code changes.
 
 ### Auto-Store Hook (Automatic Conversation Capture)
-A Claude Code **Stop hook** that fires every time the assistant finishes responding. The hook reads the conversation transcript (JSONL), extracts new user+assistant dialogue pairs, applies a loose significance filter (keyword heuristics for emotions, decisions, questions, and conversation length), and writes significant pairs directly to the memory database. This reduces dependency on the LLM's voluntary tool invocation — memories accumulate automatically regardless of whether the LLM calls `store_memory`. The hook uses only Python stdlib (no external dependencies), runs in under 1 second, and always exits cleanly to never block the session.
+A Claude Code **Stop hook** that fires every time the assistant finishes responding. The hook reads the conversation transcript (JSONL), extracts new user+assistant dialogue pairs, applies a loose significance filter (keyword heuristics for emotions, decisions, questions, and conversation length), and writes significant pairs directly to the memory database with **keyword-based emotion vector estimation** across all 8 emotion axes (joy, sadness, anger, fear, surprise, disgust, trust, anticipation) plus importance and urgency. This reduces dependency on the LLM's voluntary tool invocation — memories accumulate automatically regardless of whether the LLM calls `store_memory`. Configured as a **global hook** so memories are captured from all projects, not just the amygdala workspace. The hook uses only Python stdlib (no external dependencies), runs in under 1 second, and always exits cleanly to never block the session.
 
 ### Echo Chamber Prevention
 DiversityWatchdog monitors for repetitive recall of the same memories. When imbalance is detected, memories from other categories are automatically injected.
@@ -422,6 +422,7 @@ See [proposal v0.4](docs/emotion-memory-system-proposal-v0.4.md) for details.
 | Phase 7 | Session hook auto-recall — SessionStart hook / context.json persistence / DB fallback / automatic memory injection at session start | 285 PASS | Done |
 | Phase 8 | Pattern-Triggered Activation (PTA) — store/recall description reframing from decision-making to pattern recognition / recall_memories zero-vector response fix / CLAUDE.md memory protocol | 285 PASS | Done |
 | Phase 9 | Auto-Store Stop Hook — automatic conversation capture via Claude Code Stop hook / transcript JSONL parsing / keyword-based significance filter / direct SQLite write / incremental processing | 330 PASS | Done |
+| Phase 9.1 | Auto-Store improvements — global Stop hook (all projects) / keyword-based emotion 8-axis estimation / session hook zero-vector fallback | 331 PASS | Done |
 
 ### Directory Structure
 
@@ -451,7 +452,7 @@ amygdala/
 │   ├── run_labeling.sh        # Labeling workflow runner (Phase 4)
 │   ├── export_recall_log.py   # recall_log CSV exporter (Phase 4)
 │   └── accuracy_report.py     # Accuracy report generator (Phase 4)
-├── tests/                    # 330 tests
+├── tests/                    # 331 tests
 ├── docs/
 │   ├── emotion-memory-system-proposal-v0.4.md
 │   ├── relational-graph-design.md

@@ -328,6 +328,43 @@ def estimate_scenes(pair: dict) -> list[str]:
     return matched[:3] if matched else ["meta"]
 
 
+# 感情8軸のキーワード辞書
+EMOTION_AXIS_KEYWORDS = {
+    "joy": ["嬉しい", "嬉し", "楽しい", "楽し", "よかった", "最高", "素晴らしい",
+            "感動", "ありがとう", "完成", "成功", "うまくいった", "いいね", "良い"],
+    "sadness": ["悲しい", "寂しい", "残念", "辛い", "辛く", "虚しい", "切ない",
+                "落ち込", "がっかり", "悔しい"],
+    "anger": ["怒り", "腹立", "イライラ", "ムカつ", "ふざけ", "ひどい",
+              "許せ", "最悪", "くそ", "ダメ"],
+    "fear": ["怖い", "怖く", "不安", "心配", "恐い", "恐れ", "ヤバい",
+             "まずい", "危ない", "リスク"],
+    "surprise": ["驚い", "びっくり", "まさか", "予想外", "意外", "ショック",
+                 "え？", "えっ", "なんと", "知らなかった"],
+    "disgust": ["嫌だ", "嫌い", "気持ち悪い", "うんざり", "飽き", "もういい"],
+    "trust": ["信頼", "任せ", "大丈夫", "安心", "確実", "間違いない",
+              "頼り", "信じ", "理解", "なるほど"],
+    "anticipation": ["楽しみ", "期待", "待ち遠し", "ワクワク", "やろう",
+                     "始めよう", "進めよう", "計画", "予定", "これから"],
+}
+
+
+def estimate_emotions(pair: dict) -> dict[str, float]:
+    """キーワードベースで感情8軸を推定する（0.0-1.0）。"""
+    combined = pair["user"] + " " + pair["assistant"]
+    emotions = {}
+    for axis, keywords in EMOTION_AXIS_KEYWORDS.items():
+        matched_count = sum(1 for kw in keywords if kw in combined)
+        if matched_count == 0:
+            emotions[axis] = 0.0
+        elif matched_count == 1:
+            emotions[axis] = 0.4
+        elif matched_count == 2:
+            emotions[axis] = 0.6
+        else:
+            emotions[axis] = min(0.3 + matched_count * 0.2, 1.0)
+    return emotions
+
+
 # ---------------------------------------------------------------------------
 # SQLite 書き込み
 # ---------------------------------------------------------------------------
@@ -357,15 +394,24 @@ def store_to_db(db_path: str, memories: list[dict]) -> int:
         conn = sqlite3.connect(db_path, timeout=5)
         for mem in memories:
             try:
+                emo = mem.get("emotions", {})
                 conn.execute(
                     """INSERT INTO memories
                        (content, raw_input, joy, sadness, anger, fear,
                         surprise, disgust, trust, anticipation,
                         importance, urgency, scenes)
-                       VALUES (?, ?, 0, 0, 0, 0, 0, 0, 0, 0, ?, ?, ?)""",
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         mem["content"],
                         mem["raw_input"],
+                        emo.get("joy", 0.0),
+                        emo.get("sadness", 0.0),
+                        emo.get("anger", 0.0),
+                        emo.get("fear", 0.0),
+                        emo.get("surprise", 0.0),
+                        emo.get("disgust", 0.0),
+                        emo.get("trust", 0.0),
+                        emo.get("anticipation", 0.0),
                         mem["importance"],
                         mem["urgency"],
                         json.dumps(mem["scenes"], ensure_ascii=False),
@@ -422,6 +468,7 @@ def process(hook_input: dict, db_path_arg: str | None) -> int:
         to_store.append({
             "content": summarize_pair(pair),
             "raw_input": raw_text[:500],
+            "emotions": estimate_emotions(pair),
             "importance": estimate_importance(pair),
             "urgency": estimate_urgency(pair),
             "scenes": estimate_scenes(pair),
